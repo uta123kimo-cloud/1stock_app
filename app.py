@@ -4,172 +4,154 @@ import yfinance as yf
 import pandas_ta as ta
 import numpy as np
 from datetime import datetime, timedelta
+import analysis_engine as engine 
 
 # ===========================================================================
-# 1. 核心指標計算 (維持原邏輯，加入數據預熱)
-# ===========================================================================
-def get_slope_poly(data, window):
-    if len(data) < window: return 0
-    y = data.values
-    x = np.arange(window)
-    coeffs = np.polyfit(x, y, 1)
-    return (coeffs[0] / y[0]) * 100 if y[0] != 0 else 0
-
-def get_taiwan_symbol(ticker):
-    ticker = str(ticker).strip()
-    if ticker.isdigit():
-        if len(ticker) == 4: return f"{ticker}.TW"
-        elif len(ticker) == 6: return f"{ticker}.TWO"
-    return ticker
-
-def get_indicator_data(symbol, start_dt, end_dt):
-    try:
-        # 100 天預熱確保 PVO (EMA) 精確度
-        adj_start = start_dt - timedelta(days=100)
-        df = yf.download(symbol, start=adj_start, end=end_dt, progress=False, auto_adjust=True)
-        if df is None or df.empty: return None
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-        df.columns = [str(c).strip() for c in df.columns]
-
-        ev12 = ta.ema(df['Volume'], length=12)
-        ev26 = ta.ema(df['Volume'], length=26)
-        df['PVO'] = ((ev12 - ev26) / (ev26 + 1e-6)) * 100
-        df['VRI'] = (ta.sma(df['Volume'].where(df['Close'].diff() > 0, 0), 14) / (ta.sma(df['Volume'], 14) + 1e-6)) * 100
-        df['Slope'] = df['Close'].rolling(5).apply(lambda x: get_slope_poly(x, 5))
-        df['Score'] = (df['PVO'] * 0.2) + (df['VRI'] * 0.2) + (df['Slope'] * 0.6)
-        return df.loc[start_dt.strftime('%Y-%m-%d'):].dropna()
-    except: return None
-
-# ===========================================================================
-# 2. 核心決策引擎 (對齊 8 階狀態排序)
+# 3. 核心決策引擎 (完全對齊您的原始邏輯)
 # ===========================================================================
 def get_four_dimension_advice(df, c_idx):
     window = 60
-    if c_idx < window + 2: return "數據不足", "---", 0.0, 0.0
+    # 這裡確保索引不會越界
+    if c_idx < window + 2: return "數據不足", "---", 0, 0
     
     hist_slopes = df['Slope'].iloc[max(0, c_idx-window):c_idx+1]
     hist_scores = df['Score'].iloc[max(0, c_idx-window):c_idx+1]
 
     sz = (df.iloc[c_idx]['Slope'] - hist_slopes.mean()) / (hist_slopes.std() + 1e-6)
     scz = (df.iloc[c_idx]['Score'] - hist_scores.mean()) / (hist_scores.std() + 1e-6)
-    v = df.iloc[c_idx]['VRI']
-    pd = df.iloc[c_idx]['PVO'] - df.iloc[c_idx-1]['PVO']
 
+    v = df.iloc[c_idx]['VRI']
+    pd_val = df.iloc[c_idx]['PVO'] - df.iloc[c_idx-1]['PVO']
+
+    # 您的原邏輯：連續三日斜率上升
     try:
         is_u = df.iloc[c_idx]['Slope'] > df.iloc[c_idx-1]['Slope'] > df.iloc[c_idx-2]['Slope']
     except: is_u = False
 
-    # 方向判斷
-    is_long = sz > 0.6 or (is_u and scz > 0)
-    is_short = sz < -1.0 or (not is_u and scz < -0.8)
+    # 方向閘門
+    def direction_gate(s_z, score_z, is_up):
+        if s_z > 0.6 or (is_up and score_z > 0): return "做多"
+        elif s_z < -1.0 or (not is_up and score_z < -0.8): return "做空"
+        return "觀望"
 
-    # 1-8 階狀態分配邏輯
-    def detailed_gate(s_z, vri, p_d, is_up, is_l, is_s):
-        if is_l:
-            if s_z > 1.5 and p_d > 5: return "🚀 強力買進"
-            if s_z > 1.0: return "🔥 強勢多頭"
-            if vri > 90 or p_d < -2: return "⚠️ 多頭觀望"
-            return "💎 多頭持有"
-        if is_up: return "🔎 準備翻多"
-        if is_s:
-            if is_up: return "📉 空頭觀望"
-            return "💀 空頭趨勢"
-        return "☕ 空手觀望"
+    current_dir = direction_gate(sz, scz, is_u)
 
-    curr_op = detailed_gate(sz, v, pd, is_u, is_long, is_short)
-
-    # 歷史行動回溯
+    # 歷史行動追蹤 (回溯 150 天)
     last_action_display = "---"
-    # (回溯邏輯維持不變，僅返回日期與方向)
+    if current_dir != "觀望":
+        first_date = "---"
+        for offset in range(1, 150):
+            p_idx = c_idx - offset
+            if p_idx < window + 2: break
+
+            h_win = df['Slope'].iloc[p_idx-window:p_idx+1]
+            h_sz = (df.iloc[p_idx]['Slope'] - h_win.mean()) / (h_win.std() + 1e-6)
+            h_win_sc = df['Score'].iloc[p_idx-window:p_idx+1]
+            h_scz = (df.iloc[p_idx]['Score'] - h_win_sc.mean()) / (h_win_sc.std() + 1e-6)
+            try:
+                h_up = df.iloc[p_idx]['Slope'] > df.iloc[p_idx-1]['Slope'] > df.iloc[p_idx-2]['Slope']
+            except: h_up = False
+
+            if direction_gate(h_sz, h_scz, h_up) == current_dir:
+                first_date = f"{df.index[p_idx].strftime('%m/%d')} {current_dir}"
+            else:
+                break
+        last_action_display = first_date if first_date != "---" else f"今日{current_dir}"
+
+    # 操作建議細分
+    def detailed_gate(s_z, vri, p_d, is_up):
+        if s_z > 0.6:
+            if s_z > 1.5 and p_d > 5: return "🚀 強力買進"
+            return "💎 波段持有"
+        if is_up: return "🔎 準備翻多"
+        # 增加您要求的細分標籤
+        if s_z < -1.0: return "📉 空頭趨勢"
+        return "☕ 觀望整理"
+
+    curr_op = detailed_gate(sz, v, pd_val, is_u)
+    
+    # 額外判斷「多頭觀望」
+    if curr_op == "💎 波段持有" and (v > 90 or pd_val < -2):
+        curr_op = "⚠️ 多頭觀望"
+    elif s_z < -1.0 and is_u:
+        curr_op = "📉 空頭觀望"
+
     return curr_op, last_action_display, sz, scz
 
-# ===========================================================================
-# 3. Streamlit UI (視覺強化)
-# ===========================================================================
-st.set_page_config(page_title="2026 量化 8 階戰術版", layout="wide")
-
-st.markdown("""
-    <style>
-    .stDataFrame div[data-testid="stTable"] { font-size: 22px !important; }
-    .big-status { font-size: 30px !important; font-weight: bold; color: #1E40AF; }
-    .metric-card { background-color: #f8fafc; padding: 20px; border-radius: 12px; border: 2px solid #e2e8f0; margin-bottom: 20px; }
-    .stMetric label { font-size: 20px !important; }
-    </style>
-""", unsafe_allow_html=True)
+# ==========================================
+# 4. Streamlit UI 介面
+# ==========================================
+st.set_page_config(page_title="2026 量化交易終端", layout="wide")
 
 def main():
-    st.title("🛡️ 2026 四維量價判斷系統 (8 階戰術版)")
-    
+    st.title("📊 2026 四維量價判斷系統 (邏輯完全對齊版)")
+
     with st.sidebar:
-        target_date = st.date_input("分析基準日", datetime.now())
-        st.divider()
-        ticker_input = st.text_input("單股代碼", "2330")
-        single_btn = st.button("單股分析")
-        st.divider()
-        full_btn = st.button("啟動全市場 8 階掃描")
-
-    lookback = 180
-    end_dt = datetime.strptime(target_date.strftime('%Y-%m-%d'), "%Y-%m-%d") + timedelta(days=1)
-    start_dt = end_dt - timedelta(days=lookback)
-
-    # --- 1. 大盤基準 (補齊價位、PVO、VRI、斜率 Z) ---
-    st.subheader("🌏 市場基準環境 (Benchmark)")
-    b_cols = st.columns(2)
-    benchmarks = {"加權指數": "^TWII", "台灣 50": "0050.TW"}
-    
-    for i, (name, code) in enumerate(benchmarks.items()):
-        b_df = get_indicator_data(code, start_dt, end_dt)
-        if b_df is not None:
-            op, _, sz, _ = get_four_dimension_advice(b_df, len(b_df)-1)
-            curr = b_df.iloc[-1]
-            with b_cols[i]:
-                st.markdown(f"""<div class='metric-card'>
-                    <div class='big-status'>{name} : {op}</div>
-                    <hr>
-                    <table style='width:100%; text-align:center; font-size:24px;'>
-                        <tr style='color:#64748b;'><td>價位</td><td>PVO</td><td>VRI</td><td>斜率Z</td></tr>
-                        <tr style='font-weight:bold;'>
-                            <td>{curr['Close']:.0f}</td>
-                            <td>{curr['PVO']:.1f}</td>
-                            <td>{curr['VRI']:.1f}</td>
-                            <td>{sz:.2f}</td>
-                        </tr>
-                    </table>
-                </div>""", unsafe_allow_html=True)
-
-    # --- 2. 全市場 8 階排序清單 ---
-    if full_btn:
-        st.divider()
-        st.subheader("📋 全市場強勢度排序 (依 8 階狀態權重)")
+        st.header("🎯 模式選擇")
+        mode = st.radio("功能", ["個股狙擊", "全市場掃描"])
+        target_date = st.date_input("基準日期", datetime.now())
         
-        watchlist = ["2330", "2317", "2454", "2308", "2382", "3231", "3037", "2603", "2881", "2882", "1513", "1504"]
-        results = []
-        # 嚴格定義 8 階權重排序
-        rank_order = {
-            "🚀 強力買進": 1, "🔥 強勢多頭": 2, "💎 多頭持有": 3, "🔎 準備翻多": 4,
-            "⚠️ 多頭觀望": 5, "📉 空頭觀望": 6, "☕ 空手觀望": 7, "💀 空頭趨勢": 8
-        }
+        if mode == "個股狙擊":
+            ticker = st.text_input("輸入代碼 (2330)", "2330")
+            btn = st.button("執行診斷")
+        else:
+            btn = st.button("啟動全掃描 (180D)")
 
-        with st.spinner("8 階邏輯掃描中..."):
-            for t in watchlist:
-                df = get_indicator_data(get_taiwan_symbol(t), start_dt, end_dt)
-                if df is not None and len(df) > 65:
-                    op, _, sz, _ = get_four_dimension_advice(df, len(df)-1)
-                    curr = df.iloc[-1]
-                    results.append({
-                        "股票": t,
-                        "操作狀態": op,
-                        "現價": f"{curr['Close']:.2f}",
-                        "PVO": round(curr['PVO'], 2),
-                        "VRI": round(curr['VRI'], 1),
-                        "斜率Z": round(sz, 2),
-                        "_rank": rank_order.get(op, 99)
-                    })
-        
-        if results:
-            # 雙重排序：等級優先 (1->8)，等級相同則依斜率Z (強->弱)
-            res_df = pd.DataFrame(results).sort_values(by=["_rank", "斜率Z"], ascending=[True, False])
-            st.dataframe(res_df.drop(columns=["_rank"]), use_container_width=True, height=600)
+    if btn:
+        lookback = 180
+        end_dt = datetime.strptime(target_date.strftime('%Y-%m-%d'), "%Y-%m-%d") + timedelta(days=1)
+        start_dt = end_dt - timedelta(days=lookback)
+
+        if mode == "個股狙擊":
+            symbol = engine.get_taiwan_symbol(ticker)
+            df = engine.get_indicator_data(symbol, start_dt, end_dt)
+            if df is not None:
+                op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
+                st.subheader(f"個股報告: {ticker}")
+                col1, col2, col3 = st.columns(3)
+                col1.metric("目前建議", op)
+                col2.metric("前次行動", last)
+                col3.metric("Slope_Z", f"{sz:.2f}")
+                st.dataframe(df.tail(10))
+            else:
+                st.error("查無資料")
+
+        else:
+            # 大盤指標優先
+            st.subheader("🌏 市場大盤環境")
+            m_cols = st.columns(2)
+            for i, m_code in enumerate(["^TWII", "0050.TW"]):
+                m_df = engine.get_indicator_data(m_code, start_dt, end_dt)
+                if m_df is not None:
+                    m_op, m_last, m_sz, _ = get_four_dimension_advice(m_df, len(m_df)-1)
+                    m_cols[i].info(f"**{m_code}**: {m_op} (起始於 {m_last})")
+
+            st.divider()
+            
+            # 全清單掃描
+            df_results = engine.run_analysis(target_date.strftime('%Y-%m-%d'), lookback, 100)
+            if not df_results.empty:
+                final_rows = []
+                for _, row in df_results.iterrows():
+                    hist = row.get('_df')
+                    if hist is not None and len(hist) >= 5:
+                        op, last, sz, scz = get_four_dimension_advice(hist, len(hist)-1)
+                        # 加入 PVO Delta 計算
+                        pd_val = hist.iloc[-1]['PVO'] - hist.iloc[-2]['PVO']
+                        
+                        final_rows.append({
+                            "股票": row['股票'],
+                            "操作建議": op,
+                            "前次行動": last,
+                            "現價": f"{row['收盤價']:.2f}",
+                            "Slope_Z": sz,
+                            "PVO_D": f"{pd_val:+.1f}",
+                            "VRI": f"{hist.iloc[-1]['VRI']:.1f}",
+                            "Score_Z": scz
+                        })
+                
+                res_df = pd.DataFrame(final_rows).sort_values(by="Slope_Z", ascending=False)
+                st.dataframe(res_df, use_container_width=True, height=600)
 
 if __name__ == "__main__":
     main()
