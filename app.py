@@ -63,7 +63,7 @@ with st.sidebar:
 
 
 # ===================================================================
-# 回測時間設定
+# 回測時間設定（固定 1 年 = 365 天）
 # ===================================================================
 LOOKBACK_1Y = 365
 end_dt = datetime.strptime(target_date.strftime('%Y-%m-%d'), "%Y-%m-%d") + timedelta(days=1)
@@ -78,7 +78,7 @@ def format_days(x):
         return ""
     if x > 100:
         return "百"
-    return x
+    return int(x)
 
 
 # ===================================================================
@@ -122,11 +122,10 @@ def backtest_all_trades(df):
             if reach_m10 is None and ret <= -10:
                 reach_m10 = days
 
-            # === 出場條件 B：空單立即出場 ===
+            # === 出場條件：連續 5 天觀望 或 出現空單 ===
             if "空單進場" in status or sz < -1:
                 exit_idx = i
             else:
-                # === 出場條件 A：連續 5 天觀望才賣 ===
                 if "觀望" in status:
                     observe_count += 1
                 else:
@@ -140,7 +139,6 @@ def backtest_all_trades(df):
             trade_days = exit_idx - entry_idx
             total_ret = (exit_price / entry_price - 1) * 100
 
-            # === 套用「百」顯示規則 ===
             trades.append({
                 "進場日": df.iloc[entry_idx].name.strftime("%Y-%m-%d"),
                 "出場日": df.iloc[exit_idx].name.strftime("%Y-%m-%d"),
@@ -160,12 +158,9 @@ def backtest_all_trades(df):
         return None, None
 
     df_trades = pd.DataFrame(trades)
-
-    # 左側日期欄
     df_trades.index = pd.to_datetime(df_trades["進場日"])
     df_trades.index.name = "進場日(索引)"
 
-    # === 總績效統計 ===
     win_rate = (df_trades["報酬率%"] > 0).mean() * 100
     avg_ret = df_trades["報酬率%"].mean()
     max_win = df_trades["報酬率%"].max()
@@ -194,7 +189,44 @@ def backtest_all_trades(df):
 st.title("🛡️ SJ 四維量價分析系統")
 
 # ============================================================
-# 單股分析（完整回測系統）
+# 預設首頁顯示四大指數
+# ============================================================
+st.subheader("📊 主要指數即時狀態")
+
+INDEX_LIST = {
+    "台股大盤": "^TWII",
+    "0050": "0050.TW",
+    "那斯達克": "^IXIC",
+    "費半": "^SOX"
+}
+
+cols = st.columns(4)
+
+for col, (name, sym) in zip(cols, INDEX_LIST.items()):
+    df = get_indicator_data(sym, start_1y, end_dt)
+    if df is not None and len(df) > 50:
+
+        curr = df.iloc[-1]
+        op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
+        status, _ = map_status(op, sz)
+
+        price = curr["Close"]
+        if ".TW" in sym:
+            price = int(round(price, 0))
+        else:
+            price = round(price, 2)
+
+        col.markdown(f"""
+        **{name}**  
+        收盤：{price}  
+        狀態：{status}  
+        PVO：{curr['PVO']:.2f}  
+        VRI：{curr['VRI']:.2f}  
+        Slope_Z：{sz:.2f}  
+        """)
+
+# ============================================================
+# 單股分析
 # ============================================================
 if run_btn and mode == "單股分析":
 
@@ -208,6 +240,8 @@ if run_btn and mode == "單股分析":
     else:
         if ".TW" in symbol:
             df["Close"] = df["Close"].round(0).astype(int)
+        else:
+            df["Close"] = df["Close"].round(2)
 
         op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
         status, _ = map_status(op, sz)
@@ -235,8 +269,5 @@ if run_btn and mode == "單股分析":
         if df_trades is None:
             st.info("一年內沒有完整交易紀錄")
         else:
-            st.markdown("### 🧾 交易明細（含左側進場日期索引，>100 天顯示為「百」）")
             st.dataframe(df_trades, use_container_width=True, height=400)
-
-            st.markdown("### 📈 總績效統計")
             st.dataframe(df_summary, use_container_width=True)
