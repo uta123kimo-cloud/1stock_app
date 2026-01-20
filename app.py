@@ -48,15 +48,30 @@ def map_status(op_text, slope_z):
 
 
 # ===================================================================
-# 回測參數
+# 側邊欄
 # ===================================================================
-LOOKBACK_1Y = 365
-today = datetime.now()
-end_dt = today + timedelta(days=1)
-start_1y = end_dt - timedelta(days=LOOKBACK_1Y)
+with st.sidebar:
+    st.title("🎯 分析模式")
+    mode = st.radio("選擇分析類型", ["單股分析", "台股市場分析", "美股市場分析"])
+
+    st.divider()
+    target_date = st.date_input("分析基準日", datetime.now())
+
+    st.divider()
+    ticker_input = st.text_input("單股代號", "2330")
+    run_btn = st.button("開始分析")
+
 
 # ===================================================================
-# 多交易回測引擎（專業版）
+# 回測時間設定（以基準日為終點）
+# ===================================================================
+LOOKBACK_1Y = 365
+end_dt = datetime.strptime(target_date.strftime('%Y-%m-%d'), "%Y-%m-%d") + timedelta(days=1)
+start_1y = end_dt - timedelta(days=LOOKBACK_1Y)
+
+
+# ===================================================================
+# 多交易回測引擎（完整版）
 # ===================================================================
 def backtest_all_trades(df):
 
@@ -75,7 +90,7 @@ def backtest_all_trades(df):
         status, _ = map_status(op, sz)
         price = df.iloc[i]["Close"]
 
-        # 進場
+        # === 進場 ===
         if not in_trade and status == "⭐ 多單進場":
             in_trade = True
             entry_idx = i
@@ -88,6 +103,7 @@ def backtest_all_trades(df):
             ret = (price / entry_price - 1) * 100
             days = i - entry_idx
 
+            # === 價格達標天數（不管訊號）===
             if reach_10 is None and ret >= 10:
                 reach_10 = days
             if reach_20 is None and ret >= 20:
@@ -95,17 +111,17 @@ def backtest_all_trades(df):
             if reach_m10 is None and ret <= -10:
                 reach_m10 = days
 
-            # 出場條件 B：空單立即出場
+            # === 出場條件 B：空單立即出場 ===
             if "空單進場" in status or sz < -1:
                 exit_idx = i
             else:
-                # 出場條件 A：連續 10 天觀望
+                # === 出場條件 A：連續 5 天觀望才賣 ===
                 if "觀望" in status:
                     observe_count += 1
                 else:
                     observe_count = 0
 
-                if observe_count < 10:
+                if observe_count < 5:
                     continue
                 exit_idx = i
 
@@ -118,9 +134,9 @@ def backtest_all_trades(df):
                 "出場日": df.iloc[exit_idx].name.strftime("%Y-%m-%d"),
                 "交易天數": trade_days,
                 "報酬率%": round(total_ret, 2),
-                "+10%天數": reach_10,
-                "+20%天數": reach_20,
-                "-10%天數": reach_m10,
+                "+10% 天數": reach_10,
+                "+20% 天數": reach_20,
+                "-10% 天數": reach_m10,
             })
 
             equity.append(equity[-1] * (1 + total_ret / 100))
@@ -132,7 +148,10 @@ def backtest_all_trades(df):
         return None, None
 
     df_trades = pd.DataFrame(trades)
+
+    # 左側日期欄（你要求）
     df_trades.index = pd.to_datetime(df_trades["進場日"])
+    df_trades.index.name = "進場日(索引)"
 
     # === 總績效統計 ===
     win_rate = (df_trades["報酬率%"] > 0).mean() * 100
@@ -158,15 +177,6 @@ def backtest_all_trades(df):
 
 
 # ===================================================================
-# 側邊欄
-# ===================================================================
-with st.sidebar:
-    st.title("🎯 分析模式")
-    mode = st.radio("選擇分析類型", ["單股分析", "台股市場分析", "美股市場分析"])
-    ticker_input = st.text_input("單股代號", "2330")
-    run_btn = st.button("開始分析")
-
-# ===================================================================
 # 主畫面
 # ===================================================================
 st.title("🛡️ SJ 四維量價分析系統")
@@ -176,7 +186,7 @@ st.title("🛡️ SJ 四維量價分析系統")
 # ============================================================
 if run_btn and mode == "單股分析":
 
-    st.subheader("📌 單股即時分析 + 一年交易績效")
+    st.subheader("📌 單股即時分析 + 一年完整交易回測")
 
     symbol = get_taiwan_symbol(ticker_input)
     df = get_indicator_data(symbol, start_1y, end_dt)
@@ -192,7 +202,7 @@ if run_btn and mode == "單股分析":
         curr = df.iloc[-1]
 
         st.markdown(f"""
-        ### 🎯 {ticker_input} 當前狀態  
+        ### 🎯 {ticker_input} 當前狀態（截至 {target_date}）  
         狀態：**{status}**  
         操作建議：{op}  
         """)
@@ -206,15 +216,15 @@ if run_btn and mode == "單股分析":
 
         # === 回測區 ===
         st.divider()
-        st.subheader("📊 最近一年完整交易回測")
+        st.subheader("📊 最近一年所有交易明細")
 
         df_trades, df_summary = backtest_all_trades(df)
 
         if df_trades is None:
             st.info("一年內沒有完整交易紀錄")
         else:
-            st.markdown("### 🧾 交易明細")
-            st.dataframe(df_trades, use_container_width=True)
+            st.markdown("### 🧾 交易明細（含左側進場日期索引）")
+            st.dataframe(df_trades, use_container_width=True, height=400)
 
             st.markdown("### 📈 總績效統計")
             st.dataframe(df_summary, use_container_width=True)
