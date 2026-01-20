@@ -63,11 +63,22 @@ with st.sidebar:
 
 
 # ===================================================================
-# 回測時間設定（以基準日為終點）
+# 回測時間設定
 # ===================================================================
 LOOKBACK_1Y = 365
 end_dt = datetime.strptime(target_date.strftime('%Y-%m-%d'), "%Y-%m-%d") + timedelta(days=1)
 start_1y = end_dt - timedelta(days=LOOKBACK_1Y)
+
+
+# ===================================================================
+# 天數顯示轉換工具（>100 顯示為「百」）
+# ===================================================================
+def format_days(x):
+    if x is None:
+        return ""
+    if x > 100:
+        return "百"
+    return x
 
 
 # ===================================================================
@@ -129,14 +140,15 @@ def backtest_all_trades(df):
             trade_days = exit_idx - entry_idx
             total_ret = (exit_price / entry_price - 1) * 100
 
+            # === 套用「百」顯示規則 ===
             trades.append({
                 "進場日": df.iloc[entry_idx].name.strftime("%Y-%m-%d"),
                 "出場日": df.iloc[exit_idx].name.strftime("%Y-%m-%d"),
-                "交易天數": trade_days,
+                "交易天數": format_days(trade_days),
                 "報酬率%": round(total_ret, 2),
-                "+10% 天數": reach_10,
-                "+20% 天數": reach_20,
-                "-10% 天數": reach_m10,
+                "+10% 天數": format_days(reach_10),
+                "+20% 天數": format_days(reach_20),
+                "-10% 天數": format_days(reach_m10),
             })
 
             equity.append(equity[-1] * (1 + total_ret / 100))
@@ -149,7 +161,7 @@ def backtest_all_trades(df):
 
     df_trades = pd.DataFrame(trades)
 
-    # 左側日期欄（你要求）
+    # 左側日期欄
     df_trades.index = pd.to_datetime(df_trades["進場日"])
     df_trades.index.name = "進場日(索引)"
 
@@ -223,7 +235,7 @@ if run_btn and mode == "單股分析":
         if df_trades is None:
             st.info("一年內沒有完整交易紀錄")
         else:
-            st.markdown("### 🧾 交易明細（含左側進場日期索引）")
+            st.markdown("### 🧾 交易明細（含左側進場日期索引，>100 天顯示為「百」）")
             st.dataframe(df_trades, use_container_width=True, height=400)
 
             st.markdown("### 📈 總績效統計")
