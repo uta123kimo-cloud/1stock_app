@@ -118,9 +118,9 @@ st.markdown("""
     .stDataFrame div[data-testid="stTable"] { font-size: 22px !important; }
     div[data-testid="stExpander"] p { font-size: 20px !important; }
     /* 大盤卡片文字大小 */
-    .metric-container { background-color: #f0f2f6; padding: 20px; border-radius: 10px; border: 2px solid #d1d5db; }
-    .big-status { font-size: 32px !important; font-weight: bold; color: #1e40af; }
-    .metric-value { font-size: 28px !important; font-weight: bold; }
+    .metric-container { background-color: #f0f2f6; padding: 20px; border-radius: 14px; border: 2px solid #d1d5db; }
+    .big-status { font-size: 22px !important; font-weight: bold; color: #1e40af; }
+    .metric-value { font-size: 22px !important; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
