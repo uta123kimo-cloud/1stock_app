@@ -9,7 +9,7 @@ from backtest_5d import get_four_dimension_advice
 
 # === 正確讀取名單（關鍵修正點）===
 from config import WATCH_LIST as TAIWAN_LIST
-from config-A import WATCH_LIST as US_LIST
+from configA import WATCH_LIST as US_LIST
 
 # ===================================================================
 # UI 基本設定
