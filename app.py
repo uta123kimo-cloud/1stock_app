@@ -22,13 +22,12 @@ def backtest_all_trades(df):
             entry_price = price
             observe_count = 0
             reach_10 = reach_20 = reach_m10 = None
-            # ⚠️ 不能 continue，當天就要開始計算
-            # continue
+            # ⚠️ 不能 continue，當天就開始算
 
         # === 持倉中 ===
         if in_trade:
 
-            # 交易天數（從第 1 天開始算）
+            # 交易天數（從第 1 天開始）
             days = i - entry_idx + 1
             ret = (price / entry_price - 1) * 100
 
@@ -40,10 +39,10 @@ def backtest_all_trades(df):
             if reach_m10 is None and ret <= -10:
                 reach_m10 = days
 
-            # === 出場條件 ===
+            # === 出場條件判斷 ===
             exit_flag = False
 
-            # 強制反向訊號出場
+            # 反向強制出場
             if "空單進場" in status or sz < -1:
                 exit_flag = True
             else:
