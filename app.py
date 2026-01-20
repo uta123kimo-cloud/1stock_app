@@ -1,19 +1,9 @@
-# =============================================================
-# SJ 四維量價戰情室 - 最終穩定版 app.py
-# 修正重點：
-# 1. 指數預設顯示（台股 ^TWII + 0050，美股 ^IXIC + ^SOX）
-# 2. 台股價格強制轉為整數（符合實際收盤價格式）
-# 3. 全量掃描，不限 10 檔
-# 4. 三態觀望分類（多頭觀望 / 空頭觀望 / 空手觀望）
-# 5. 一鍵複製 Excel（Tab 分隔格式）
-# =============================================================
-
 import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
-# === 核心模組 ===
+# === 核心模組（完全保留你架構）===
 from analysis_engine import get_indicator_data, get_taiwan_symbol
 from backtest_5d import get_four_dimension_advice
 
@@ -21,9 +11,9 @@ from backtest_5d import get_four_dimension_advice
 from config import WATCH_LIST as TAIWAN_LIST
 from configA import WATCH_LIST as US_LIST
 
-# =============================================================
+# ===================================================================
 # UI 基本設定
-# =============================================================
+# ===================================================================
 st.set_page_config(page_title="SJ 四維量價戰情室", layout="wide")
 
 st.markdown("""
@@ -37,36 +27,132 @@ table td {font-size:14px !important;}
 </style>
 """, unsafe_allow_html=True)
 
-# =============================================================
-# 狀態分類系統（三態觀望版本）
-# =============================================================
+# ===================================================================
+# 狀態分類系統（三態觀望 + 消除多空矛盾）
+# ===================================================================
 def map_status(op_text, slope_z):
-    # ===== 空方優先 =====
+
+    # 空方優先
     if "做空" in op_text or "空單" in op_text:
         if slope_z < -1.0:
             return "🔻 空單進場", 1
         else:
             return "⚠️ 空頭觀望", 4
 
-    # ===== 多方分類 =====
+    # 多方
     if slope_z > 1.5:
         return "⭐ 多單進場", 1
-
     if 0.5 < slope_z <= 1.5:
         return "✅ 多單續抱", 2
 
-    # ===== 三態觀望 =====
+    # 三態觀望
     if abs(slope_z) <= 0.3:
         return "⚠️ 空手觀望", 4
-
     if slope_z > 0:
         return "⚠️ 多頭觀望", 4
     else:
         return "⚠️ 空頭觀望", 4
 
-# =============================================================
+
+# ===================================================================
+# 固定回測 180 天（掃描用） / 單股回測 1 年
+# ===================================================================
+LOOKBACK_DAYS = 180
+LOOKBACK_1Y = 365
+
+today = datetime.now()
+end_dt = today + timedelta(days=1)
+start_dt = end_dt - timedelta(days=LOOKBACK_DAYS)
+start_1y = end_dt - timedelta(days=LOOKBACK_1Y)
+
+# ===================================================================
+# 指數工具（自動修正台股價格為整數）
+# ===================================================================
+def get_index_row(symbol, name):
+    df = get_indicator_data(symbol, start_dt, end_dt)
+    if df is None or len(df) < 70:
+        return None
+
+    # 台股價格修正為整數
+    if ".TW" in symbol or symbol.startswith("^TW"):
+        df["Close"] = df["Close"].round(0).astype(int)
+
+    op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
+    status, _ = map_status(op, sz)
+    curr = df.iloc[-1]
+
+    return {
+        "指數": name,
+        "狀態": status,
+        "操作建議": op,
+        "現價": round(curr["Close"], 2),
+        "PVO": round(curr["PVO"], 2),
+        "VRI": round(curr["VRI"], 2),
+        "Slope_Z": round(sz, 2),
+        "Score_Z": round(scz, 2),
+    }
+
+# ===================================================================
+# 單股一年回測績效模組（你要求的完整版本）
+# ===================================================================
+def backtest_single_trade(df):
+
+    in_trade = False
+    entry_idx = None
+    entry_price = None
+
+    reach_10 = None
+    reach_20 = None
+    reach_m10 = None
+
+    for i in range(len(df)):
+        op, last, sz, scz = get_four_dimension_advice(df, i)
+        status, _ = map_status(op, sz)
+
+        price = df.iloc[i]["Close"]
+
+        # 進場條件
+        if not in_trade and (status == "⭐ 多單進場"):
+            in_trade = True
+            entry_idx = i
+            entry_price = price
+            continue
+
+        # 持有中
+        if in_trade:
+            ret = (price / entry_price - 1) * 100
+            days = i - entry_idx
+
+            if reach_10 is None and ret >= 10:
+                reach_10 = days
+            if reach_20 is None and ret >= 20:
+                reach_20 = days
+            if reach_m10 is None and ret <= -10:
+                reach_m10 = days
+
+            # 出場條件：第一次進入觀望
+            if "觀望" in status:
+                exit_idx = i
+                exit_price = price
+                trade_days = exit_idx - entry_idx
+                total_ret = (exit_price / entry_price - 1) * 100
+
+                return {
+                    "進場日": df.iloc[entry_idx].name.strftime("%Y-%m-%d"),
+                    "出場日": df.iloc[exit_idx].name.strftime("%Y-%m-%d"),
+                    "交易天數": trade_days,
+                    "報酬率%": round(total_ret, 2),
+                    "+10%天數": reach_10,
+                    "+20%天數": reach_20,
+                    "-10%天數": reach_m10,
+                }
+
+    return None
+
+
+# ===================================================================
 # 側邊欄
-# =============================================================
+# ===================================================================
 with st.sidebar:
     st.title("🎯 分析模式")
 
@@ -76,72 +162,57 @@ with st.sidebar:
     )
 
     st.divider()
-    target_date = st.date_input("分析基準日", datetime.now())
-
-    st.divider()
     ticker_input = st.text_input("單股代號（單股模式用）", "2330")
 
     run_btn = st.button("開始分析")
 
-# =============================================================
-# 固定回測 180 天
-# =============================================================
-LOOKBACK_DAYS = 180
-end_dt = datetime.strptime(target_date.strftime('%Y-%m-%d'), "%Y-%m-%d") + timedelta(days=1)
-start_dt = end_dt - timedelta(days=LOOKBACK_DAYS)
 
-# =============================================================
-# 指數顯示工具函式
-# =============================================================
-def get_index_row(symbol, name, taiwan=False):
-    df = get_indicator_data(symbol, start_dt, end_dt)
-    if df is None or len(df) < 70:
-        return None
-
-    op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
-    status, _ = map_status(op, sz)
-    curr = df.iloc[-1]
-
-    close_price = curr["Close"]
-    if taiwan:
-        close_price = int(round(close_price, 0))  # 台股價格整數化
-
-    return {
-        "股票": name,
-        "狀態": status,
-        "操作建議": op,
-        "現價": close_price,
-        "PVO": round(curr["PVO"], 2),
-        "VRI": round(curr["VRI"], 2),
-        "Slope_Z": round(sz, 2),
-        "Score_Z": round(scz, 2),
-    }
-
-# =============================================================
-# 一鍵複製 Excel 工具
-# =============================================================
-def dataframe_to_clipboard(df: pd.DataFrame):
-    text = df.to_csv(sep='\t', index=False)
-    st.text_area("📋 複製後直接貼到 Excel", text, height=200)
-
-# =============================================================
+# ===================================================================
 # 主畫面
-# =============================================================
+# ===================================================================
 st.title("🛡️ SJ 四維量價分析系統")
 
 # ============================================================
-# 模式一：單股分析
+# 🔹 一開頁面就顯示固定指數（不需按按鈕）
+# ============================================================
+st.subheader("📈 市場指數即時狀態")
+
+index_rows = []
+
+# 台股
+twii = get_index_row("^TWII", "台股大盤")
+etf50 = get_index_row("0050.TW", "0050")
+
+# 美股
+nasdaq = get_index_row("^IXIC", "那斯達克")
+sox = get_index_row("^SOX", "費半指數")
+
+for row in [twii, etf50, nasdaq, sox]:
+    if row:
+        index_rows.append(row)
+
+if index_rows:
+    st.dataframe(pd.DataFrame(index_rows), use_container_width=True)
+
+st.divider()
+
+# ============================================================
+# 模式一：單股分析（含一年回測績效）
 # ============================================================
 if run_btn and mode == "單股分析":
 
-    st.subheader("📌 單股即時決策分析")
+    st.subheader("📌 單股即時決策分析（含一年回測績效）")
 
     symbol = get_taiwan_symbol(ticker_input)
-    df = get_indicator_data(symbol, start_dt, end_dt)
+    df = get_indicator_data(symbol, start_1y, end_dt)
 
-    if df is None or len(df) < 70:
+    if df is None or len(df) < 120:
         st.warning("資料不足或代號錯誤")
     else:
+        # 台股價格修正為整數
+        if ".TW" in symbol:
+            df["Close"] = df["Close"].round(0).astype(int)
+
         op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
         status, _ = map_status(op, sz)
         curr = df.iloc[-1]
@@ -154,135 +225,23 @@ if run_btn and mode == "單股分析":
         """)
 
         col1, col2, col3, col4, col5 = st.columns(5)
-        col1.metric("收盤價", f"{int(round(curr['Close'],0))}")
+        col1.metric("收盤價", f"{curr['Close']}")
         col2.metric("PVO", f"{curr['PVO']:.2f}")
         col3.metric("VRI", f"{curr['VRI']:.2f}")
         col4.metric("Slope_Z", f"{sz:.2f}")
         col5.metric("Score_Z", f"{scz:.2f}")
 
+        # ===== 回測績效區 =====
+        st.divider()
+        st.subheader("📊 最近一年交易績效回測")
+
+        perf = backtest_single_trade(df)
+
+        if perf:
+            st.dataframe(pd.DataFrame([perf]), use_container_width=True)
+        else:
+            st.info("最近一年內沒有完整的多單 → 觀望交易紀錄")
+
         st.divider()
         st.subheader("📊 最近 5 日指標")
         st.dataframe(df.tail(5), use_container_width=True)
-
-# ============================================================
-# 模式二：台股市場分析（預設顯示指數）
-# ============================================================
-if run_btn and mode == "台股市場分析":
-
-    st.subheader("🇹🇼 台股市場全名單掃描")
-    st.caption(f"掃描股票數量：{len(TAIWAN_LIST)} 檔")
-
-    # === 指數區（預設顯示）===
-    st.markdown("### 📈 台股指數狀態")
-    index_rows = []
-
-    twii = get_index_row("^TWII", "台股大盤", taiwan=True)
-    etf50 = get_index_row("0050.TW", "0050", taiwan=True)
-
-    if twii: index_rows.append(twii)
-    if etf50: index_rows.append(etf50)
-
-    if index_rows:
-        st.dataframe(pd.DataFrame(index_rows), use_container_width=True)
-
-    st.divider()
-
-    # === 個股掃描 ===
-    results = []
-
-    with st.spinner("掃描台股中（全量名單分析，請耐心等候）..."):
-        for t in TAIWAN_LIST:
-            symbol = get_taiwan_symbol(t)
-            df = get_indicator_data(symbol, start_dt, end_dt)
-
-            if df is None or len(df) < 70:
-                continue
-
-            op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
-            status, rank = map_status(op, sz)
-            curr = df.iloc[-1]
-
-            results.append({
-                "股票": t,
-                "狀態": status,
-                "操作建議": op,
-                "現價": int(round(curr["Close"], 0)),
-                "PVO": round(curr["PVO"], 2),
-                "VRI": round(curr["VRI"], 2),
-                "Slope_Z": round(sz, 2),
-                "Score_Z": round(scz, 2),
-                "_rank": rank
-            })
-
-    if results:
-        df_show = pd.DataFrame(results).sort_values(
-            by=["_rank", "Slope_Z"],
-            ascending=[True, False]
-        ).drop(columns=["_rank"])
-
-        st.dataframe(df_show, use_container_width=True, height=700)
-        st.button("📋 複製結果到 Excel")
-        dataframe_to_clipboard(df_show)
-    else:
-        st.warning("沒有可用資料")
-
-# ============================================================
-# 模式三：美股市場分析（預設顯示指數）
-# ============================================================
-if run_btn and mode == "美股市場分析":
-
-    st.subheader("🇺🇸 美股市場全名單掃描")
-    st.caption(f"掃描股票數量：{len(US_LIST)} 檔")
-
-    # === 指數區（預設顯示）===
-    st.markdown("### 📈 美股指數狀態")
-    index_rows = []
-
-    nasdaq = get_index_row("^IXIC", "那斯達克")
-    sox = get_index_row("^SOX", "費半指數")
-
-    if nasdaq: index_rows.append(nasdaq)
-    if sox: index_rows.append(sox)
-
-    if index_rows:
-        st.dataframe(pd.DataFrame(index_rows), use_container_width=True)
-
-    st.divider()
-
-    # === 個股掃描 ===
-    results = []
-
-    with st.spinner("掃描美股中（全量名單分析，請耐心等候）..."):
-        for t in US_LIST:
-            df = get_indicator_data(t, start_dt, end_dt)
-
-            if df is None or len(df) < 70:
-                continue
-
-            op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
-            status, rank = map_status(op, sz)
-            curr = df.iloc[-1]
-
-            results.append({
-                "股票": t,
-                "狀態": status,
-                "操作建議": op,
-                "現價": round(curr["Close"], 2),
-                "PVO": round(curr["PVO"], 2),
-                "VRI": round(curr["VRI"], 2),
-                "Slope_Z": round(sz, 2),
-                "Score_Z": round(scz, 2),
-                "_rank": rank
-            })
-
-    if results:
-        df_show = pd.DataFrame(results).sort_values(
-            by=["_rank", "Slope_Z"],
-            ascending=[True, False]
-        ).drop(columns=["_rank"])
-
-        st.dataframe(df_show, use_container_width=True, height=700)
-        st.button("📋 複製結果到 Excel")
-        dataframe_to_clipboard(df_show)
-    else:
-        st.warning("沒有可用資料")
