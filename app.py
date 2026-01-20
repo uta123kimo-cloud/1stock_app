@@ -3,16 +3,19 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
-# 直接使用你既有模組（完全不破壞架構）
+# === 核心模組（完全保留你架構）===
 from analysis_engine import get_indicator_data, get_taiwan_symbol
 from backtest_5d import get_four_dimension_advice
+
+# === 正確讀取名單（關鍵修正點）===
+from config import WATCH_LIST as TAIWAN_LIST
+from config_A import WATCH_LIST as US_LIST
 
 # ===================================================================
 # UI 基本設定
 # ===================================================================
 st.set_page_config(page_title="SJ 四維量價戰情室", layout="wide")
 
-# 字體與版面控制（你要求的字級）
 st.markdown("""
 <style>
 h1 {font-size:20px !important;}
@@ -25,13 +28,9 @@ table td {font-size:14px !important;}
 """, unsafe_allow_html=True)
 
 # ===================================================================
-# 狀態分類系統（依你給的六類訊號）
+# 狀態分類系統（你原本邏輯完整保留）
 # ===================================================================
 def map_status(op_text, slope_z):
-    """
-    回傳：
-    顯示狀態、排序權重
-    """
     # 買入訊號
     if "強力買進" in op_text or slope_z > 1.5:
         return "⭐ 多單進場", 1
@@ -46,11 +45,10 @@ def map_status(op_text, slope_z):
     if abs(slope_z) <= 0.3:
         return "⚠️ 觀望", 4
 
-    # 預設
     return "⚠️ 觀望", 4
 
 # ===================================================================
-# 側邊欄選單（你要求的三模式）
+# 側邊欄
 # ===================================================================
 with st.sidebar:
     st.title("🎯 分析模式")
@@ -74,20 +72,6 @@ with st.sidebar:
 LOOKBACK_DAYS = 180
 end_dt = datetime.strptime(target_date.strftime('%Y-%m-%d'), "%Y-%m-%d") + timedelta(days=1)
 start_dt = end_dt - timedelta(days=LOOKBACK_DAYS)
-
-# ===================================================================
-# 讀取 Config 名單（台股 / 美股）
-# ===================================================================
-# 你之後可以放在 config.py / config_a.py
-TAIWAN_LIST = [
-    "2330", "2317", "2454", "2308", "2382", "3231", "3037",
-    "2603", "2881", "2882", "1513", "1504"
-]
-
-US_LIST = [
-    "AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA",
-    "GOOGL", "AMD", "AVGO", "NFLX"
-]
 
 # ===================================================================
 # 主畫面
@@ -130,15 +114,16 @@ if run_btn and mode == "單股分析":
         st.dataframe(df.tail(5), use_container_width=True)
 
 # ============================================================
-# 模式二：台股市場分析（全名單掃描 + 依強到弱排序）
+# 模式二：台股市場分析（真正掃 config 全名單）
 # ============================================================
 if run_btn and mode == "台股市場分析":
 
     st.subheader("🇹🇼 台股市場全名單掃描（依強度排序）")
+    st.caption(f"掃描股票數量：{len(TAIWAN_LIST)} 檔")
 
     results = []
 
-    with st.spinner("掃描台股中..."):
+    with st.spinner("掃描台股中（名單較多，請耐心等候）..."):
         for t in TAIWAN_LIST:
             symbol = get_taiwan_symbol(t)
             df = get_indicator_data(symbol, start_dt, end_dt)
@@ -167,20 +152,21 @@ if run_btn and mode == "台股市場分析":
             ascending=[True, False]
         ).drop(columns=["_rank"])
 
-        st.dataframe(df_show, use_container_width=True, height=650)
+        st.dataframe(df_show, use_container_width=True, height=700)
     else:
         st.warning("沒有可用資料")
 
 # ============================================================
-# 模式三：美股市場分析（全名單掃描 + 依強到弱排序）
+# 模式三：美股市場分析（真正掃 config_A 全名單）
 # ============================================================
 if run_btn and mode == "美股市場分析":
 
     st.subheader("🇺🇸 美股市場全名單掃描（依強度排序）")
+    st.caption(f"掃描股票數量：{len(US_LIST)} 檔")
 
     results = []
 
-    with st.spinner("掃描美股中..."):
+    with st.spinner("掃描美股中（名單較多，請耐心等候）..."):
         for t in US_LIST:
             df = get_indicator_data(t, start_dt, end_dt)
 
@@ -208,6 +194,6 @@ if run_btn and mode == "美股市場分析":
             ascending=[True, False]
         ).drop(columns=["_rank"])
 
-        st.dataframe(df_show, use_container_width=True, height=650)
+        st.dataframe(df_show, use_container_width=True, height=700)
     else:
         st.warning("沒有可用資料")
