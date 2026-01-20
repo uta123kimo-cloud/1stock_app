@@ -11,37 +11,52 @@ def backtest_all_trades(df):
     reach_10 = reach_20 = reach_m10 = None
 
     for i in range(len(df)):
+
         op, last, sz, scz = get_four_dimension_advice(df, i)
         status, _ = map_status(op, sz)
         price = df.iloc[i]["Close"]
 
         # =====================================================
-        # 進場條件（修正重點：允許 ⭐ 或 第一次出現 ✅ 進場）
+        # 進場邏輯（允許趨勢初期與強勢突破）
         # =====================================================
         if not in_trade:
 
-            # 原本只吃 ⭐，幾乎不會交易 → 系統空白
-            if status in ["⭐ 多單進場", "✅ 多單續抱"]:
+            # ⭐ 強勢突破
+            if status == "⭐ 多單進場":
 
                 in_trade = True
                 entry_idx = i
                 entry_price = price
+
+            # ✅ 趨勢延續第一天也可進場
+            elif status == "✅ 多單續抱":
+
+                # 避免連續多天重複進場，只吃第一次
+                if i == 0:
+                    continue
+                prev_op, _, prev_sz, _ = get_four_dimension_advice(df, i-1)
+                prev_status, _ = map_status(prev_op, prev_sz)
+
+                if prev_status not in ["⭐ 多單進場", "✅ 多單續抱"]:
+                    in_trade = True
+                    entry_idx = i
+                    entry_price = price
+
+            if in_trade:
                 observe_count = 0
                 reach_10 = reach_20 = reach_m10 = None
-
-                # 進場當天就開始計算，不 continue
+                continue   # 進場當天不檢查出場
 
 
         # =====================================================
-        # 持倉中
+        # 持倉中處理
         # =====================================================
         if in_trade:
 
-            # 交易天數（從第 1 天開始）
             days = i - entry_idx + 1
             ret = (price / entry_price - 1) * 100
 
-            # === 價格達標天數（核心修正區）===
+            # ---------- 價格目標天數統計 ----------
             if reach_10 is None and ret >= 10:
                 reach_10 = days
             if reach_20 is None and ret >= 20:
@@ -49,26 +64,31 @@ def backtest_all_trades(df):
             if reach_m10 is None and ret <= -10:
                 reach_m10 = days
 
-            # === 出場條件判斷 ===
+            # =================================================
+            # 出場判斷機制（三層）
+            # =================================================
             exit_flag = False
 
-            # 強制反向出場
+            # (A) 強制反向出場
             if "空單進場" in status or sz < -1:
                 exit_flag = True
 
-            else:
-                # 觀望累積出場
-                if "觀望" in status:
-                    observe_count += 1
-                else:
-                    observe_count = 0
-
+            # (B) 觀望累積 5 天出場
+            elif "觀望" in status:
+                observe_count += 1
                 if observe_count >= 5:
                     exit_flag = True
 
-            # =====================================================
-            # 出場
-            # =====================================================
+            else:
+                observe_count = 0
+
+            # (C) 保護性最長持倉（防止死單）
+            if days >= 120:   # 最多持倉 120 天
+                exit_flag = True
+
+            # =================================================
+            # 出場執行
+            # =================================================
             if exit_flag:
 
                 exit_idx = i
@@ -88,19 +108,46 @@ def backtest_all_trades(df):
 
                 equity.append(equity[-1] * (1 + total_ret / 100))
 
+                # 重置狀態
                 in_trade = False
                 observe_count = 0
+                entry_idx = None
+                entry_price = None
+                reach_10 = reach_20 = reach_m10 = None
 
 
     # =====================================================
-    # 無交易保護
+    # 最後一筆尚未出場 → 強制在最後一天平倉（關鍵修正）
+    # =====================================================
+    if in_trade:
+
+        exit_idx = len(df) - 1
+        exit_price = df.iloc[-1]["Close"]
+        trade_days = exit_idx - entry_idx + 1
+        total_ret = (exit_price / entry_price - 1) * 100
+
+        trades.append({
+            "進場日": df.iloc[entry_idx].name.strftime("%Y-%m-%d"),
+            "出場日": df.iloc[exit_idx].name.strftime("%Y-%m-%d"),
+            "交易天數": format_days(trade_days),
+            "報酬率%": round(total_ret, 2),
+            "+10% 天數": format_days(reach_10),
+            "+20% 天數": format_days(reach_20),
+            "-10% 天數": format_days(reach_m10),
+        })
+
+        equity.append(equity[-1] * (1 + total_ret / 100))
+
+
+    # =====================================================
+    # 若一年真的沒有交易（理論上現在不會發生）
     # =====================================================
     if not trades:
         return None, None
 
 
     # =====================================================
-    # 統計區（原樣保留）
+    # 統計區
     # =====================================================
     df_trades = pd.DataFrame(trades)
     df_trades.index = pd.to_datetime(df_trades["進場日"])
