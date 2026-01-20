@@ -15,23 +15,33 @@ def backtest_all_trades(df):
         status, _ = map_status(op, sz)
         price = df.iloc[i]["Close"]
 
-        # === 進場 ===
-        if not in_trade and status == "⭐ 多單進場":
-            in_trade = True
-            entry_idx = i
-            entry_price = price
-            observe_count = 0
-            reach_10 = reach_20 = reach_m10 = None
-            # ⚠️ 不能 continue，當天就開始算
+        # =====================================================
+        # 進場條件（修正重點：允許 ⭐ 或 第一次出現 ✅ 進場）
+        # =====================================================
+        if not in_trade:
 
-        # === 持倉中 ===
+            # 原本只吃 ⭐，幾乎不會交易 → 系統空白
+            if status in ["⭐ 多單進場", "✅ 多單續抱"]:
+
+                in_trade = True
+                entry_idx = i
+                entry_price = price
+                observe_count = 0
+                reach_10 = reach_20 = reach_m10 = None
+
+                # 進場當天就開始計算，不 continue
+
+
+        # =====================================================
+        # 持倉中
+        # =====================================================
         if in_trade:
 
             # 交易天數（從第 1 天開始）
             days = i - entry_idx + 1
             ret = (price / entry_price - 1) * 100
 
-            # === 價格達標天數（不管訊號）===
+            # === 價格達標天數（核心修正區）===
             if reach_10 is None and ret >= 10:
                 reach_10 = days
             if reach_20 is None and ret >= 20:
@@ -42,9 +52,10 @@ def backtest_all_trades(df):
             # === 出場條件判斷 ===
             exit_flag = False
 
-            # 反向強制出場
+            # 強制反向出場
             if "空單進場" in status or sz < -1:
                 exit_flag = True
+
             else:
                 # 觀望累積出場
                 if "觀望" in status:
@@ -55,8 +66,11 @@ def backtest_all_trades(df):
                 if observe_count >= 5:
                     exit_flag = True
 
-            # === 出場 ===
+            # =====================================================
+            # 出場
+            # =====================================================
             if exit_flag:
+
                 exit_idx = i
                 exit_price = price
                 trade_days = exit_idx - entry_idx + 1
@@ -77,9 +91,17 @@ def backtest_all_trades(df):
                 in_trade = False
                 observe_count = 0
 
+
+    # =====================================================
+    # 無交易保護
+    # =====================================================
     if not trades:
         return None, None
 
+
+    # =====================================================
+    # 統計區（原樣保留）
+    # =====================================================
     df_trades = pd.DataFrame(trades)
     df_trades.index = pd.to_datetime(df_trades["進場日"])
     df_trades.index.name = "進場日(索引)"
