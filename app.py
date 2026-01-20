@@ -115,12 +115,12 @@ st.set_page_config(page_title="2026 四維量價戰情室", layout="wide")
 st.markdown("""
     <style>
     /* 表格內容與標題字體 */
-    .stDataFrame div[data-testid="stTable"] { font-size: 20px !important; }
-    div[data-testid="stExpander"] p { font-size: 20px !important; }
+    .stDataFrame div[data-testid="stTable"] { font-size: 18px !important; }
+    div[data-testid="stExpander"] p { font-size: 18px !important; }
     /* 大盤卡片文字大小 */
-    .metric-container { background-color: #f0f2f6; padding: 18px; border-radius: 14px; border: 2px solid #d1d5db; }
-    .big-status { font-size: 18px !important; font-weight: bold; color: #1e40af; }
-    .metric-value { font-size: 18px !important; font-weight: bold; }
+    .metric-container { background-color: #f0f2f6; padding: 16px; border-radius: 14px; border: 2px solid #d1d5db; }
+    .big-status { font-size: 16px !important; font-weight: bold; color: #1e40af; }
+    .metric-value { font-size: 16px !important; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
