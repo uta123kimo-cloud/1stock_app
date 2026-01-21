@@ -150,8 +150,9 @@ def calc_market_heat(status_count, total):
 st.title("🛡️ SJ 四維量價分析系統")
 
 # ============================================================
-# 單股分析（補 Slope_Z + 近5日擴散率 + 圖表）
+# 🔥 單股分析三線圖更新版（收盤價 + PVO 放大 + 20日擴散率）
 # ============================================================
+
 if run_btn and mode=="單股分析":
     st.subheader("📌 單股即時分析")
     symbol = get_taiwan_symbol(ticker_input)
@@ -188,34 +189,56 @@ if run_btn and mode=="單股分析":
         col6.metric("20日擴散率", f"{trend_ratio}%")
 
         # ============================================================
-# 🔥 圖表：收盤價 + PVO + 20日擴散率
-# ============================================================
-close_series = df["Close"] if "Close" in df.columns else pd.Series(np.nan, index=df.index)
-pvo_series = df["PVO"] if "PVO" in df.columns else pd.Series(np.nan, index=df.index)
-trend_series = pd.Series([calc_trend_stability(df.iloc[:i+1],20)[0] for i in range(len(df))], index=df.index)
+        # 🔹 圖表資料處理
+        # ============================================================
+        # PVO / VRI
+        pvo_series = df["PVO"] if "PVO" in df.columns else pd.Series(np.nan, index=df.index)
+        vri_series = df["VRI"] if "VRI" in df.columns else pd.Series(np.nan, index=df.index)
 
-fig, ax1 = plt.subplots(figsize=(12,5))
+        # 放大 PVO 使其與收盤價共用左軸可比
+        scale_factor = df['Close'].max() / pvo_series.max() * 0.8 if pvo_series.max() != 0 else 1
+        pvo_scaled = pvo_series * scale_factor
 
-# 左軸：收盤價 + PVO
-ax1.plot(df.index, close_series, color='black', label='收盤價', linewidth=1.5)
-ax1.plot(df.index, pvo_series, color='blue', label='PVO', linewidth=1.5)
-ax1.set_ylabel("收盤價 / PVO", color='black')
-ax1.tick_params(axis='y', labelcolor='black')
-ax1.set_title(f"{ticker_input} | 收盤價 + PVO + 20日擴散率同步圖")
+        # 20日擴散率
+        trend_series = pd.Series([calc_trend_stability(df.iloc[:i+1],20)[0] for i in range(len(df))], index=df.index)
 
-# 右軸：20日擴散率
-ax2 = ax1.twinx()
-ax2.plot(df.index, trend_series, color='red', label='20日擴散率', linewidth=2, linestyle='--', marker='o')
-ax2.set_ylabel("20日擴散率 (%)", color='red')
-ax2.tick_params(axis='y', labelcolor='red')
+        # ============================================================
+        # 🔹 時間軸縮短為半年
+        # ============================================================
+        six_months_ago = end_dt - timedelta(days=182)
+        df_plot = df[df.index >= six_months_ago]
+        pvo_scaled = pvo_scaled[df_plot.index]
+        vri_series = vri_series[df_plot.index]
+        trend_series = trend_series[df_plot.index]
 
-# 標註最近5日擴散率
-for i, val in enumerate(last5):
-    ax2.text(df.index[-5+i], val+1, f"{val}%", color='red', fontsize=10, ha='center')
+        # ============================================================
+        # 🔹 繪圖
+        # ============================================================
+        fig, ax1 = plt.subplots(figsize=(12,5))
 
-ax1.legend(loc='upper left')
-ax2.legend(loc='upper right')
+        # 左軸：收盤價 + PVO
+        ax1.plot(df_plot.index, df_plot['Close'], color='black', label='收盤價', linewidth=2)
+        ax1.plot(df_plot.index, pvo_scaled, color='blue', label='PVO 放大', linewidth=1.5)
+        ax1.set_ylabel("收盤價 / PVO", color='black')
+        ax1.tick_params(axis='y', labelcolor='black')
 
-st.pyplot(fig)
+        # 右軸：20日擴散率
+        ax2 = ax1.twinx()
+        ax2.plot(df_plot.index, trend_series, color='red', label='20日擴散率', linewidth=2, linestyle='--', marker='o')
+        ax2.set_ylabel("20日擴散率 (%)", color='red')
+        ax2.tick_params(axis='y', labelcolor='red')
+
+        # 標註最近5日
+        last5_plot = [trend_series.iloc[-i-1] for i in range(5)]
+        for i, val in enumerate(last5_plot[::-1]):
+            ax2.text(df_plot.index[-5+i], val+1, f"{val}%", color='red', fontsize=10, ha='center')
+
+        # 圖例
+        ax1.legend(loc='upper left')
+        ax2.legend(loc='upper right')
+        ax1.set_title(f"{ticker_input} | 收盤價 + PVO + 20日擴散率 (最近半年)")
+
+        st.pyplot(fig)
+
 
        
