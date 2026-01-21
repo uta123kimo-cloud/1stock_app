@@ -107,6 +107,166 @@ else:
     end_dt = datetime.strptime(str(target_date), "%Y-%m-%d") + timedelta(days=1)
 start_1y = end_dt - timedelta(days=LOOKBACK_1Y)
 
+def backtest_all_trades(df):
+    df = df.copy()
+    df.index = pd.to_datetime(df.index)
+
+    trades = []
+    equity = [1.0]
+
+    in_trade = False
+    entry_idx = None
+    entry_price = None
+    observe_count = 0
+
+    reach_10 = reach_20 = reach_m10 = None
+    max_days = 100  # Maximum days to check for conditions
+
+    for i in range(len(df)):
+        op, last, sz, scz = get_four_dimension_advice(df, i)
+        status, _ = map_status(op, sz)
+        price = df.iloc[i]["Close"]
+
+        # === 進場 ===
+        if not in_trade and status == "⭐ 多單進場":
+            in_trade = True
+            entry_idx = i
+            entry_price = price
+            observe_count = 0
+            reach_10 = reach_20 = reach_m10 = None
+            continue
+
+        # === 持倉中 ===
+        if in_trade:
+            days = i - entry_idx + 1
+
+            # 🔥 關鍵修正：用「從進場到今天的 Close 序列」檢查是否曾經達標
+            window = df.iloc[entry_idx:i+1]["Close"]
+
+            max_close = window.max()
+            min_close = window.min()
+
+            max_ret = (max_close / entry_price - 1) * 100
+            min_ret = (min_close / entry_price - 1) * 100
+
+            if reach_10 is None and max_ret >= 10:
+                reach_10 = days
+            if reach_20 is None and max_ret >= 20:
+                reach_20 = days
+            if reach_m10 is None and min_ret <= -10:
+                reach_m10 = days
+
+            # === 出場條件（完全不動你的邏輯）===
+            exit_flag = False
+
+            if "空單進場" in status or sz < -1:
+                exit_flag = True
+            elif "觀望" in status:
+                observe_count += 1
+                if observe_count >= 5:
+                    exit_flag = True
+            else:
+                observe_count = 0
+
+            # === 出場 ===
+            if exit_flag:
+                exit_idx = i
+                exit_price = price
+                trade_days = exit_idx - entry_idx + 1
+                total_ret = (exit_price / entry_price - 1) * 100
+
+                # 🔧 再保險一次：出場當天完整檢查（防止最後一天漏算）
+                window = df.iloc[entry_idx:exit_idx+1]["Close"]
+
+                max_close = window.max()
+                min_close = window.min()
+
+                max_ret = (max_close / entry_price - 1) * 100
+                min_ret = (min_close / entry_price - 1) * 100
+
+                if reach_10 is None and max_ret >= 10:
+                    reach_10 = trade_days
+                if reach_20 is None and max_ret >= 20:
+                    reach_20 = trade_days
+                if reach_m10 is None and min_ret <= -10:
+                    reach_m10 = trade_days
+
+                trades.append({
+                    "進場日": df.iloc[entry_idx].name.strftime("%Y-%m-%d"),
+                    "出場日": df.iloc[exit_idx].name.strftime("%Y-%m-%d"),
+                    "交易天數": format_days(trade_days),
+                    "報酬率%": round(total_ret, 2),
+                    "+10% 天數": format_days(reach_10),
+                    "+20% 天數": format_days(reach_20),
+                    "-10% 天數": format_days(reach_m10),
+                })
+
+                equity.append(equity[-1] * (1 + total_ret / 100))
+
+                in_trade = False
+                observe_count = 0
+                entry_idx = None
+                entry_price = None
+                reach_10 = reach_20 = reach_m10 = None
+
+    # 🔥 最後一筆尚未出場 → 強制平倉（同樣完整掃描）
+    if in_trade:
+        exit_idx = len(df) - 1
+        exit_price = df.iloc[-1]["Close"]
+        trade_days = exit_idx - entry_idx + 1
+        total_ret = (exit_price / entry_price - 1) * 100
+
+        window = df.iloc[entry_idx:exit_idx+1]["Close"]
+
+        max_close = window.max()
+        min_close = window.min()
+
+        max_ret = (max_close / entry_price - 1) * 100
+        min_ret = (min_close / entry_price - 1) * 100
+
+        if reach_10 is None and max_ret >= 10:
+            reach_10 = trade_days
+        if reach_20 is None and max_ret >= 20:
+            reach_20 = trade_days
+        if reach_m10 is None and min_ret <= -10:
+            reach_m10 = trade_days
+
+        trades.append({
+            "進場日": df.iloc[entry_idx].name.strftime("%Y-%m-%d"),
+            "出場日": df.iloc[exit_idx].name.strftime("%Y-%m-%d"),
+            "交易天數": format_days(trade_days),
+            "報酬率%": round(total_ret, 2),
+            "+10% 天數": format_days(reach_10),
+            "+20% 天數": format_days(reach_20),
+            "-10% 天數": format_days(reach_m10),
+        })
+
+        equity.append(equity[-1] * (1 + total_ret / 100))
+
+    # 新增的條件處理
+    if not trades:
+        if len(df) <= max_days:
+            return "未達", None
+        else:
+            return "百無", None
+
+    df_trades = pd.DataFrame(trades)
+
+    win_rate = (df_trades["報酬率%"] > 0).mean() * 100
+    avg_ret = df_trades["報酬率%"].mean()
+    max_win = df_trades["報酬率%"].max()
+    max_loss = df_trades["報酬率%"].min()
+
+    summary = {
+        "交易次數": len(df_trades),
+        "勝率%": round(win_rate, 2),
+        "平均報酬%": round(avg_ret, 2),
+        "最大獲利%": round(max_win, 2),
+        "最大虧損%": round(max_loss, 2),
+    }
+
+    return df_trades, pd.DataFrame([summary])
+
 # ===================================================================
 # 工具函式（不改）
 # ===================================================================
