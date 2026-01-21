@@ -188,30 +188,34 @@ if run_btn and mode=="單股分析":
         col6.metric("20日擴散率", f"{trend_ratio}%")
 
         # ============================================================
-        # 🔥 圖表：PVO/VRI vs 20日擴散率 + 最近5日標註
-        # ============================================================
-        pvo_series = df["PVO"] if "PVO" in df.columns else pd.Series(np.nan, index=df.index)
-        vri_series = df["VRI"] if "VRI" in df.columns else pd.Series(np.nan, index=df.index)
+# 🔥 圖表：收盤價 + PVO + 20日擴散率
+# ============================================================
+close_series = df["Close"] if "Close" in df.columns else pd.Series(np.nan, index=df.index)
+pvo_series = df["PVO"] if "PVO" in df.columns else pd.Series(np.nan, index=df.index)
+trend_series = pd.Series([calc_trend_stability(df.iloc[:i+1],20)[0] for i in range(len(df))], index=df.index)
 
-        trend_series = pd.Series([calc_trend_stability(df.iloc[:i+1],20)[0] for i in range(len(df))], index=df.index)
+fig, ax1 = plt.subplots(figsize=(12,5))
 
-        fig, ax1 = plt.subplots(figsize=(12,5))
-        ax1.plot(df.index, pvo_series, color='blue', label='PVO', linewidth=1.5)
-        ax1.plot(df.index, vri_series, color='green', label='VRI', linewidth=1.5)
-        ax1.set_ylabel("PVO / VRI", color='black')
-        ax1.tick_params(axis='y', labelcolor='black')
-        ax1.set_title(f"{ticker_input} | PVO / VRI 與 20日擴散率同步圖")
+# 左軸：收盤價 + PVO
+ax1.plot(df.index, close_series, color='black', label='收盤價', linewidth=1.5)
+ax1.plot(df.index, pvo_series, color='blue', label='PVO', linewidth=1.5)
+ax1.set_ylabel("收盤價 / PVO", color='black')
+ax1.tick_params(axis='y', labelcolor='black')
+ax1.set_title(f"{ticker_input} | 收盤價 + PVO + 20日擴散率同步圖")
 
-        ax2 = ax1.twinx()
-        ax2.plot(df.index, trend_series, color='red', label='20日擴散率', linewidth=2, linestyle='--', marker='o')
-        ax2.set_ylabel("20日擴散率 (%)", color='red')
-        ax2.tick_params(axis='y', labelcolor='red')
+# 右軸：20日擴散率
+ax2 = ax1.twinx()
+ax2.plot(df.index, trend_series, color='red', label='20日擴散率', linewidth=2, linestyle='--', marker='o')
+ax2.set_ylabel("20日擴散率 (%)", color='red')
+ax2.tick_params(axis='y', labelcolor='red')
 
-        # 標註最近5日
-        for i, val in enumerate(last5):
-            ax2.text(df.index[-5+i], val+1, f"{val}%", color='red', fontsize=10, ha='center')
+# 標註最近5日擴散率
+for i, val in enumerate(last5):
+    ax2.text(df.index[-5+i], val+1, f"{val}%", color='red', fontsize=10, ha='center')
 
-        ax1.legend(loc='upper left')
-        ax2.legend(loc='upper right')
+ax1.legend(loc='upper left')
+ax2.legend(loc='upper right')
 
-        st.pyplot(fig)
+st.pyplot(fig)
+
+       
