@@ -114,6 +114,7 @@ def backtest_all_trades(df):
             entry_price = price
             observe_count = 0
 
+            # 初始化
             reach_10 = reach_20 = reach_m10 = "未達"
             date_10 = date_20 = date_m10 = None
             close_10 = close_20 = close_m10 = None
@@ -124,7 +125,7 @@ def backtest_all_trades(df):
 
             future_window = df.iloc[entry_idx:i+1][["Close"]]
 
-            # 每日檢查是否達標
+            # 每天檢查是否達標
             for j, (idx, row) in enumerate(future_window.iterrows(), start=1):
                 ret = (row["Close"] / entry_price - 1) * 100
 
@@ -132,10 +133,12 @@ def backtest_all_trades(df):
                     reach_10 = j if j <= 100 else "百無"
                     date_10 = idx.strftime("%Y-%m-%d")
                     close_10 = row["Close"]
+
                 if reach_20 == "未達" and ret >= 20:
                     reach_20 = j if j <= 100 else "百無"
                     date_20 = idx.strftime("%Y-%m-%d")
                     close_20 = row["Close"]
+
                 if reach_m10 == "未達" and ret <= -10:
                     reach_m10 = j if j <= 100 else "百無"
                     date_m10 = idx.strftime("%Y-%m-%d")
@@ -160,7 +163,7 @@ def backtest_all_trades(df):
                 trade_days = exit_idx - entry_idx + 1
                 total_ret = (exit_price / entry_price - 1) * 100
 
-                # 再次檢查最後一天是否達標
+                # 最後一天補檢查
                 future_window = df.iloc[entry_idx:exit_idx+1][["Close"]]
                 for j, (idx, row) in enumerate(future_window.iterrows(), start=1):
                     ret = (row["Close"] / entry_price - 1) * 100
@@ -204,7 +207,7 @@ def backtest_all_trades(df):
                 date_10 = date_20 = date_m10 = None
                 close_10 = close_20 = close_m10 = None
 
-    # 最後一筆尚未出場 → 強制平倉
+    # 🔥 最後一筆尚未出場 → 強制平倉
     if in_trade:
 
         exit_idx = len(df) - 1
