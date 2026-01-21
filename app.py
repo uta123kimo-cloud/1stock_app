@@ -354,16 +354,36 @@ if run_btn and mode in ["台股市場分析", "美股市場分析"]:
             status, rank = map_status(op, sz)
             curr = df.iloc[-1]
 
-
-        results.append({
-            "代號": sym,
-            "收盤": round(curr["Close"], 2),
-            "狀態": status,
-            "Slope_Z": round(sz, 2),
-            "Score_Z": round(scz, 2),
-        })
+            results.append({
+                "股票": t,
+                "狀態": status,
+                "操作建議": op,
+                "現價": round(curr["Close"], 2),
+                "PVO": round(curr["PVO"], 2),
+                "VRI": round(curr["VRI"], 2),
+                "Slope_Z": round(sz, 2),
+                "Score_Z": round(scz, 2),
+                "_rank": rank
+            })
 
     if results:
-        st.dataframe(pd.DataFrame(results), use_container_width=True)
+
+        df_show = pd.DataFrame(results)
+
+        # === 狀態統計 ===
+        status_count = df_show["狀態"].value_counts()
+        st.markdown("### 📊 狀態統計")
+        st.dataframe(status_count.rename("數量"))
+
+        # === 排序（強 → 弱）===
+        df_show = df_show.sort_values(
+            by=["_rank", "Slope_Z"],
+            ascending=[True, False]
+        ).drop(columns=["_rank"])
+
+        st.divider()
+        st.subheader("📈 市場掃描結果（依強度排序）")
+        st.dataframe(df_show, use_container_width=True, height=700)
+
     else:
         st.warning("市場清單沒有可用資料")
