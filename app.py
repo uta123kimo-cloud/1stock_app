@@ -1,5 +1,3 @@
-# ================== SJ 四維量價戰情室 app.py（完整修正版） ==================
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -84,7 +82,7 @@ def format_days(x):
 
 
 # ===================================================================
-# 多交易回測引擎（🔥 完整穩定版 🔥）
+# 多交易回測引擎（🔥 修正版：10% / 20% / -10% 正常記錄 🔥）
 # ===================================================================
 def backtest_all_trades(df):
 
@@ -104,25 +102,21 @@ def backtest_all_trades(df):
         status, _ = map_status(op, sz)
         price = df.iloc[i]["Close"]
 
-        # === 進場 ===
+        # === 進場（⚠️ 不能 continue，當天就要開始計算）===
         if not in_trade and status == "⭐ 多單進場":
             in_trade = True
             entry_idx = i
             entry_price = price
             observe_count = 0
             reach_10 = reach_20 = reach_m10 = None
-            continue
 
         # === 持倉中 ===
         if in_trade:
 
-            days = i - entry_idx      # ⭐ 從隔天算第 1 天
-            if days <= 0:
-                continue
-
+            days = i - entry_idx + 1
             ret = (price / entry_price - 1) * 100
 
-            # === 價格達標紀錄 ===
+            # === 價格達標紀錄（一定會記）===
             if reach_10 is None and ret >= 10:
                 reach_10 = days
             if reach_20 is None and ret >= 20:
@@ -147,7 +141,7 @@ def backtest_all_trades(df):
 
                 exit_idx = i
                 exit_price = price
-                trade_days = exit_idx - entry_idx
+                trade_days = exit_idx - entry_idx + 1
                 total_ret = (exit_price / entry_price - 1) * 100
 
                 trades.append({
@@ -196,86 +190,62 @@ def backtest_all_trades(df):
 st.title("🛡️ SJ 四維量價分析系統")
 
 # ============================================================
-# 首頁四大指數（含 ↑ ↓）
-# ============================================================
-st.subheader("📊 主要指數即時狀態")
-
-INDEX_LIST = {
-    "台股大盤": "^TWII",
-    "0050": "0050.TW",
-    "那斯達克": "^IXIC",
-    "費半": "^SOX"
-}
-
-def arrow(v, p):
-    if v > p: return "↑"
-    if v < p: return "↓"
-    return "→"
-
-cols = st.columns(4)
-
-for col, (name, sym) in zip(cols, INDEX_LIST.items()):
-    df = get_indicator_data(sym, start_1y, end_dt)
-
-    if df is not None and len(df) > 50:
-
-        curr = df.iloc[-1]
-        prev = df.iloc[-2]
-
-        op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
-        status, _ = map_status(op, sz)
-
-        price = round(curr["Close"], 0) if ".TW" in sym else round(curr["Close"], 2)
-
-        col.markdown(f"""
-        **{name}**  
-        收盤：{price}  
-        狀態：{status}  
-        PVO：{curr['PVO']:.2f} {arrow(curr['PVO'], prev['PVO'])}  
-        VRI：{curr['VRI']:.2f} {arrow(curr['VRI'], prev['VRI'])}  
-        Slope_Z：{sz:.2f} {arrow(sz, get_four_dimension_advice(df, len(df)-2)[2])}  
-        """)
-
-# ============================================================
-# 市場分析（台股 / 美股）
+# 台股 / 美股 市場分析（🔥 排序 + 狀態統計 + 補齊指標 🔥）
 # ============================================================
 if run_btn and mode in ["台股市場分析", "美股市場分析"]:
 
-    st.subheader("📊 市場整體強弱分析")
+    title = "🇹🇼 台股市場全名單掃描（依強度排序）" if mode == "台股市場分析" else "🇺🇸 美股市場全名單掃描（依強度排序）"
+    st.subheader(title)
 
     watch = TAIWAN_LIST if mode == "台股市場分析" else US_LIST
+    st.caption(f"掃描股票數量：{len(watch)} 檔")
+
     results = []
 
-    for sym in watch:
+    with st.spinner("市場掃描中，請稍候..."):
 
-        df = get_indicator_data(sym, start_1y, end_dt)
-        if df is None or len(df) < 50:
-            continue
+        for t in watch:
 
-        op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
-        status, rank = map_status(op, sz)
-        curr = df.iloc[-1]
+            symbol = get_taiwan_symbol(t) if mode == "台股市場分析" else t
+            df = get_indicator_data(symbol, start_1y, end_dt)
 
-        results.append({
-            "代號": sym,
-            "收盤": round(curr["Close"], 2),
-            "狀態": status,
-            "PVO": round(curr["PVO"], 2),
-            "VRI": round(curr["VRI"], 2),
-            "Slope_Z": round(sz, 2),
-            "Score_Z": round(scz, 2),
-            "rank": rank
-        })
+            if df is None or len(df) < 70:
+                continue
+
+            op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
+            status, rank = map_status(op, sz)
+            curr = df.iloc[-1]
+
+            results.append({
+                "股票": t,
+                "狀態": status,
+                "操作建議": op,
+                "現價": round(curr["Close"], 2),
+                "PVO": round(curr["PVO"], 2),
+                "VRI": round(curr["VRI"], 2),
+                "Slope_Z": round(sz, 2),
+                "Score_Z": round(scz, 2),
+                "_rank": rank
+            })
 
     if results:
-        dfm = pd.DataFrame(results).sort_values("rank")
 
-        # 狀態統計
-        stat = dfm["狀態"].value_counts()
-        st.markdown("### 📌 狀態統計")
-        st.dataframe(stat)
+        df_show = pd.DataFrame(results)
 
-        st.markdown("### 📋 強弱排序清單（強 → 弱）")
-        st.dataframe(dfm.drop(columns=["rank"]), use_container_width=True)
+        # === 狀態統計 ===
+        status_count = df_show["狀態"].value_counts()
+        st.markdown("### 📊 狀態統計")
+        st.dataframe(status_count.rename("數量"))
+
+        # === 排序（強 → 弱）===
+        df_show = df_show.sort_values(
+            by=["_rank", "Slope_Z"],
+            ascending=[True, False]
+        ).drop(columns=["_rank"])
+
+        st.divider()
+        st.subheader("📈 市場掃描結果（依強度排序）")
+        st.dataframe(df_show, use_container_width=True, height=700)
+
     else:
         st.warning("市場清單沒有可用資料")
