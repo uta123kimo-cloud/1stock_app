@@ -332,22 +332,28 @@ if run_btn and mode == "單股分析":
 # ============================================================
 if run_btn and mode in ["台股市場分析", "美股市場分析"]:
 
-    st.subheader("📊 市場整體強弱分析")
+    title = "🇹🇼 台股市場全名單掃描（依強度排序）" if mode == "台股市場分析" else "🇺🇸 美股市場全名單掃描（依強度排序）"
+    st.subheader(title)
 
     watch = TAIWAN_LIST if mode == "台股市場分析" else US_LIST
+    st.caption(f"掃描股票數量：{len(watch)} 檔")
+
     results = []
 
-    for sym in watch:
+    with st.spinner("市場掃描中，請稍候..."):
 
-        df = get_indicator_data(sym, start_1y, end_dt)
-        if df is None or len(df) < 150:
-            continue
+        for t in watch:
 
-        df.index = pd.to_datetime(df.index)
+            symbol = get_taiwan_symbol(t) if mode == "台股市場分析" else t
+            df = get_indicator_data(symbol, start_1y, end_dt)
 
-        op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
-        status, _ = map_status(op, sz)
-        curr = df.iloc[-1]
+            if df is None or len(df) < 70:
+                continue
+
+            op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
+            status, rank = map_status(op, sz)
+            curr = df.iloc[-1]
+
 
         results.append({
             "代號": sym,
