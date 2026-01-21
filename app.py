@@ -119,14 +119,10 @@ def backtest_all_trades(df):
 
             days = i - entry_idx + 1
 
-            # 🔥 關鍵修正：用「從進場到今天的 Close 序列」檢查是否曾經達標
-            window = df.iloc[entry_idx:i+1]["Close"]
-
-            max_close = window.max()
-            min_close = window.min()
-
-            max_ret = (max_close / entry_price - 1) * 100
-            min_ret = (min_close / entry_price - 1) * 100
+            # 🔥 關鍵修正：只要未出場，就看未來所有 Close 是否曾達標
+            future_window = df.iloc[entry_idx:]["Close"]
+            max_ret = (future_window.max() / entry_price - 1) * 100
+            min_ret = (future_window.min() / entry_price - 1) * 100
 
             if reach_10 is None and max_ret >= 10:
                 reach_10 = days
@@ -155,14 +151,10 @@ def backtest_all_trades(df):
                 trade_days = exit_idx - entry_idx + 1
                 total_ret = (exit_price / entry_price - 1) * 100
 
-                # 🔧 再保險一次：出場當天完整檢查（防止最後一天漏算）
-                window = df.iloc[entry_idx:exit_idx+1]["Close"]
-
-                max_close = window.max()
-                min_close = window.min()
-
-                max_ret = (max_close / entry_price - 1) * 100
-                min_ret = (min_close / entry_price - 1) * 100
+                # 🔧 再保險一次：出場當天完整檢查未來 Close 是否曾達標
+                future_window = df.iloc[entry_idx:exit_idx+1]["Close"]
+                max_ret = (future_window.max() / entry_price - 1) * 100
+                min_ret = (future_window.min() / entry_price - 1) * 100
 
                 if reach_10 is None and max_ret >= 10:
                     reach_10 = trade_days
@@ -189,8 +181,7 @@ def backtest_all_trades(df):
                 entry_price = None
                 reach_10 = reach_20 = reach_m10 = None
 
-
-    # 🔥 最後一筆尚未出場 → 強制平倉（同樣完整掃描）
+    # 🔥 最後一筆尚未出場 → 強制平倉
     if in_trade:
 
         exit_idx = len(df) - 1
@@ -198,13 +189,9 @@ def backtest_all_trades(df):
         trade_days = exit_idx - entry_idx + 1
         total_ret = (exit_price / entry_price - 1) * 100
 
-        window = df.iloc[entry_idx:exit_idx+1]["Close"]
-
-        max_close = window.max()
-        min_close = window.min()
-
-        max_ret = (max_close / entry_price - 1) * 100
-        min_ret = (min_close / entry_price - 1) * 100
+        future_window = df.iloc[entry_idx:]["Close"]
+        max_ret = (future_window.max() / entry_price - 1) * 100
+        min_ret = (future_window.min() / entry_price - 1) * 100
 
         if reach_10 is None and max_ret >= 10:
             reach_10 = trade_days
@@ -224,7 +211,6 @@ def backtest_all_trades(df):
         })
 
         equity.append(equity[-1] * (1 + total_ret / 100))
-
 
     if not trades:
         return None, None
