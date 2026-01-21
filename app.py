@@ -70,21 +70,27 @@ end_dt = datetime.strptime(target_date.strftime('%Y-%m-%d'), "%Y-%m-%d") + timed
 start_1y = end_dt - timedelta(days=LOOKBACK_1Y)
 
 
+# （前面 import / UI / sidebar 全部維持不變）
+# -------------------------------------------------
+
 # ===================================================================
-# 天數顯示工具
+# 天數顯示工具（修正版）
 # ===================================================================
 def format_days(x):
     if x is None:
-        return ""
+        return "未達"
     if x > 100:
         return "百"
     return int(x)
 
 
 # ===================================================================
-# 多交易回測引擎（🔥 修正版：10% / 20% / -10% 正常記錄 🔥）
+# 多交易回測引擎（🔥 完整穩定修正版 🔥）
 # ===================================================================
 def backtest_all_trades(df):
+
+    df = df.copy()
+    df.index = pd.to_datetime(df.index)
 
     trades = []
     equity = [1.0]
@@ -102,13 +108,14 @@ def backtest_all_trades(df):
         status, _ = map_status(op, sz)
         price = df.iloc[i]["Close"]
 
-        # === 進場（⚠️ 不能 continue，當天就要開始計算）===
+        # === 進場 ===
         if not in_trade and status == "⭐ 多單進場":
             in_trade = True
             entry_idx = i
             entry_price = price
             observe_count = 0
             reach_10 = reach_20 = reach_m10 = None
+            continue
 
         # === 持倉中 ===
         if in_trade:
@@ -116,7 +123,7 @@ def backtest_all_trades(df):
             days = i - entry_idx + 1
             ret = (price / entry_price - 1) * 100
 
-            # === 價格達標紀錄（一定會記）===
+            # === 價格達標紀錄（盤中達標就記）===
             if reach_10 is None and ret >= 10:
                 reach_10 = days
             if reach_20 is None and ret >= 20:
@@ -144,6 +151,14 @@ def backtest_all_trades(df):
                 trade_days = exit_idx - entry_idx + 1
                 total_ret = (exit_price / entry_price - 1) * 100
 
+                # 🔧 出場前最後補一次是否達標（關鍵修正）
+                if reach_10 is None and total_ret >= 10:
+                    reach_10 = trade_days
+                if reach_20 is None and total_ret >= 20:
+                    reach_20 = trade_days
+                if reach_m10 is None and total_ret <= -10:
+                    reach_m10 = trade_days
+
                 trades.append({
                     "進場日": df.iloc[entry_idx].name.strftime("%Y-%m-%d"),
                     "出場日": df.iloc[exit_idx].name.strftime("%Y-%m-%d"),
@@ -161,6 +176,34 @@ def backtest_all_trades(df):
                 entry_idx = None
                 entry_price = None
                 reach_10 = reach_20 = reach_m10 = None
+
+
+    # 🔥 最後一筆尚未出場 → 強制平倉（同樣補達標）
+    if in_trade:
+
+        exit_idx = len(df) - 1
+        exit_price = df.iloc[-1]["Close"]
+        trade_days = exit_idx - entry_idx + 1
+        total_ret = (exit_price / entry_price - 1) * 100
+
+        if reach_10 is None and total_ret >= 10:
+            reach_10 = trade_days
+        if reach_20 is None and total_ret >= 20:
+            reach_20 = trade_days
+        if reach_m10 is None and total_ret <= -10:
+            reach_m10 = trade_days
+
+        trades.append({
+            "進場日": df.iloc[entry_idx].name.strftime("%Y-%m-%d"),
+            "出場日": df.iloc[exit_idx].name.strftime("%Y-%m-%d"),
+            "交易天數": format_days(trade_days),
+            "報酬率%": round(total_ret, 2),
+            "+10% 天數": format_days(reach_10),
+            "+20% 天數": format_days(reach_20),
+            "-10% 天數": format_days(reach_m10),
+        })
+
+        equity.append(equity[-1] * (1 + total_ret / 100))
 
 
     if not trades:
@@ -182,6 +225,7 @@ def backtest_all_trades(df):
     }
 
     return df_trades, pd.DataFrame([summary])
+])
 
 
 # ===================================================================
