@@ -23,7 +23,7 @@ table td {font-size:14px !important;}
 """, unsafe_allow_html=True)
 
 # ===================================================================
-# 狀態分類
+# 狀態分類（完全不改）
 # ===================================================================
 def map_status(op_text, slope_z):
     if "做空" in op_text or "空單" in op_text:
@@ -52,7 +52,41 @@ STATUS_RANK = {
 }
 
 # ===================================================================
-# 側邊欄
+# 新增：20 日個股擴散率（趨勢穩定度）模組（不影響原系統）
+# ===================================================================
+def calc_trend_stability(df, window=20):
+    if df is None or len(df) < window + 2:
+        return None, 0, window
+
+    count_long = 0
+    for i in range(len(df) - window, len(df)):
+        op, last, sz, scz = get_four_dimension_advice(df, i)
+        status, _ = map_status(op, sz)
+
+        if status in ["⭐ 多單進場", "✅ 多單續抱"]:
+            count_long += 1
+
+    ratio = round(count_long / window * 100, 1)
+    return ratio, count_long, window
+
+
+def interpret_trend_stability(ratio):
+    if ratio is None:
+        return "未提供", "—"
+
+    if ratio > 70:
+        return "🔥 強勢主升段", "可續抱 / 加碼"
+    elif ratio >= 50:
+        return "⭐ 穩定多頭", "正常波段操作"
+    elif ratio >= 30:
+        return "⚠️ 震盪偏多", "低買高賣"
+    elif ratio >= 15:
+        return "🧊 弱勢整理", "觀望為主"
+    else:
+        return "❄️ 空頭或底部", "型態觀察"
+
+# ===================================================================
+# 側邊欄（不改）
 # ===================================================================
 with st.sidebar:
     st.title("🎯 分析模式")
@@ -64,7 +98,7 @@ with st.sidebar:
     run_btn = st.button("開始分析")
 
 # ===================================================================
-# 時間設定（完全不改你原架構）
+# 時間設定（不改）
 # ===================================================================
 LOOKBACK_1Y = 365
 if isinstance(target_date, datetime):
@@ -74,7 +108,7 @@ else:
 start_1y = end_dt - timedelta(days=LOOKBACK_1Y)
 
 # ===================================================================
-# 工具函式
+# 工具函式（不改）
 # ===================================================================
 def safe_get_value(curr, key, prev=None):
     val = curr.get(key, None)
@@ -108,47 +142,7 @@ def calc_market_heat(status_count, total):
 st.title("🛡️ SJ 四維量價分析系統")
 
 # ============================================================
-# 首頁四大指數
-# ============================================================
-st.subheader("📊 主要指數即時狀態")
-
-INDEX_LIST = {
-    "台股大盤": "^TWII",
-    "0050": "0050.TW",
-    "那斯達克": "^IXIC",
-    "費半": "^SOX"
-}
-
-cols = st.columns(4)
-
-for col, (name, sym) in zip(cols, INDEX_LIST.items()):
-    df = get_indicator_data(sym, start_1y, end_dt)
-
-    if df is not None and len(df) > 50:
-
-        curr = df.iloc[-1].to_dict()
-        prev = df.iloc[-2].to_dict() if len(df)>1 else None
-
-        op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
-        status, _ = map_status(op, sz)
-
-        price = format_price(sym, curr.get("Close", np.nan))
-
-        # Slope_Z 安全補值
-        slope_show = safe_get_value(curr, "Slope_Z",
-                        {"Slope_Z": get_four_dimension_advice(df, len(df)-2)[2]})
-
-        col.markdown(f"""
-        **{name}**  
-        收盤：{price}  
-        狀態：{status}  
-        PVO：{safe_get_value(curr, 'PVO', prev)}  
-        VRI：{safe_get_value(curr, 'VRI', prev)}  
-        Slope_Z：{slope_show}  
-        """)
-
-# ============================================================
-# 單股分析（原樣）
+# 單股分析（加入 20 日擴散率）
 # ============================================================
 if run_btn and mode=="單股分析":
     st.subheader("📌 單股即時分析")
@@ -162,17 +156,27 @@ if run_btn and mode=="單股分析":
         curr = df.iloc[-1].to_dict()
         prev = df.iloc[-2].to_dict()
 
-        st.markdown(f"### 🎯 {ticker_input} 當前狀態（截至 {target_date}）\n狀態：**{status}**\n操作建議：{op}")
+        # 🔥 新增擴散率
+        trend_ratio, long_days, win_days = calc_trend_stability(df, 20)
+        trend_text, trend_advice = interpret_trend_stability(trend_ratio)
 
-        col1,col2,col3,col4,col5 = st.columns(5)
+        st.markdown(
+            f"### 🎯 {ticker_input} 當前狀態（截至 {target_date}）\n"
+            f"狀態：**{status}**\n"
+            f"操作建議：{op}\n\n"
+            f"🔥 20日趨勢穩定度：**{trend_ratio}%**｜{trend_text}｜{trend_advice}"
+        )
+
+        col1,col2,col3,col4,col5,col6 = st.columns(6)
         col1.metric("收盤價", f"{format_price(symbol,curr.get('Close'))}")
         col2.metric("PVO", safe_get_value(curr,'PVO',prev))
         col3.metric("VRI", safe_get_value(curr,'VRI',prev))
         col4.metric("Slope_Z", safe_get_value(curr,'Slope_Z',{'Slope_Z': get_four_dimension_advice(df,len(df)-2)[2]}))
         col5.metric("Score_Z", f"{scz:.2f}")
+        col6.metric("20日擴散率", f"{trend_ratio}%")
 
 # ============================================================
-# 台股 / 美股市場分析（含熱度條 + PVO / VRI）
+# 台股 / 美股市場分析（加入每檔擴散率欄位）
 # ============================================================
 if run_btn and mode in ["台股市場分析","美股市場分析"]:
 
@@ -192,6 +196,10 @@ if run_btn and mode in ["台股市場分析","美股市場分析"]:
         status, _ = map_status(op, sz)
         curr = df.iloc[-1].to_dict()
 
+        # 🔥 新增擴散率
+        trend_ratio, _, _ = calc_trend_stability(df, 20)
+        trend_text, _ = interpret_trend_stability(trend_ratio)
+
         results.append({
             "代號": sym,
             "收盤": format_price(symbol,curr.get("Close",np.nan)),
@@ -200,6 +208,11 @@ if run_btn and mode in ["台股市場分析","美股市場分析"]:
             "VRI": safe_get_value(curr,'VRI',None),
             "Slope_Z": round(sz,2),
             "Score_Z": round(scz,2),
+
+            # 🔥 新增欄位
+            "20日擴散率%": trend_ratio,
+            "趨勢解讀": trend_text,
+
             "_rank": STATUS_RANK.get(status,99)
         })
 
@@ -217,10 +230,10 @@ if run_btn and mode in ["台股市場分析","美股市場分析"]:
 
     # ===== 表格 =====
     if results:
-        df_show = pd.DataFrame(results).sort_values("_rank").drop(columns=["_rank"])
+        df_show = pd.DataFrame(results).sort_values(["_rank","20日擴散率%"], ascending=[True,False]).drop(columns=["_rank"])
         st.dataframe(df_show, use_container_width=True)
 
-        # 狀態統計（含昨日比較箭頭）
+        # 狀態統計
         count_rows = []
         for k,v in status_count.items():
             diff = v - prev_status_count.get(k,0)
