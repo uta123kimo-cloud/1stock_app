@@ -1,4 +1,3 @@
-# ========================= app.py =========================
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -64,7 +63,7 @@ with st.sidebar:
 
 
 # ===================================================================
-# 回測時間設定
+# 回測時間設定（固定 1 年）
 # ===================================================================
 LOOKBACK_1Y = 365
 end_dt = datetime.strptime(target_date.strftime('%Y-%m-%d'), "%Y-%m-%d") + timedelta(days=1)
@@ -72,7 +71,7 @@ start_1y = end_dt - timedelta(days=LOOKBACK_1Y)
 
 
 # ===================================================================
-# 天數顯示轉換工具
+# 天數顯示工具
 # ===================================================================
 def format_days(x):
     if x is None:
@@ -83,7 +82,7 @@ def format_days(x):
 
 
 # ===================================================================
-# 多交易回測引擎（⭐ 正式修正版 ⭐）
+# 多交易回測引擎（🔥 完整修正版 🔥）
 # ===================================================================
 def backtest_all_trades(df):
 
@@ -115,10 +114,10 @@ def backtest_all_trades(df):
         # === 持倉中 ===
         if in_trade:
 
-            days = i - entry_idx + 1   # ⭐ 修正：從第 1 天開始算
+            days = i - entry_idx + 1   # ⭐ 正確從第 1 天開始
             ret = (price / entry_price - 1) * 100
 
-            # === 價格達標天數（不管最後出場輸贏）===
+            # === 價格達標紀錄（一定會記）===
             if reach_10 is None and ret >= 10:
                 reach_10 = days
             if reach_20 is None and ret >= 20:
@@ -129,11 +128,8 @@ def backtest_all_trades(df):
             # === 出場條件 ===
             exit_flag = False
 
-            # 反向訊號
             if "空單進場" in status or sz < -1:
                 exit_flag = True
-
-            # 連續 5 天觀望
             elif "觀望" in status:
                 observe_count += 1
                 if observe_count >= 5:
@@ -141,7 +137,7 @@ def backtest_all_trades(df):
             else:
                 observe_count = 0
 
-            # === 出場執行 ===
+            # === 出場 ===
             if exit_flag:
 
                 exit_idx = i
@@ -168,7 +164,7 @@ def backtest_all_trades(df):
                 reach_10 = reach_20 = reach_m10 = None
 
 
-    # ⭐ 最後一筆尚未出場 → 強制平倉（關鍵修正）
+    # 🔥 最後一筆尚未出場 → 強制平倉
     if in_trade:
 
         exit_idx = len(df) - 1
@@ -208,3 +204,135 @@ def backtest_all_trades(df):
     }
 
     return df_trades, pd.DataFrame([summary])
+
+
+# ===================================================================
+# 主畫面
+# ===================================================================
+st.title("🛡️ SJ 四維量價分析系統")
+
+# ============================================================
+# 首頁四大指數（含 ↑ ↓ 與正確小數）
+# ============================================================
+st.subheader("📊 主要指數即時狀態")
+
+INDEX_LIST = {
+    "台股大盤": "^TWII",
+    "0050": "0050.TW",
+    "那斯達克": "^IXIC",
+    "費半": "^SOX"
+}
+
+cols = st.columns(4)
+
+for col, (name, sym) in zip(cols, INDEX_LIST.items()):
+    df = get_indicator_data(sym, start_1y, end_dt)
+
+    if df is not None and len(df) > 50:
+
+        curr = df.iloc[-1]
+        prev = df.iloc[-2]
+
+        op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
+        status, _ = map_status(op, sz)
+
+        def arrow(v, p):
+            if v > p: return "↑"
+            if v < p: return "↓"
+            return "→"
+
+        price = round(curr["Close"], 0) if ".TW" in sym else round(curr["Close"], 2)
+
+        col.markdown(f"""
+        **{name}**  
+        收盤：{price}  
+        狀態：{status}  
+        PVO：{curr['PVO']:.2f} {arrow(curr['PVO'], prev['PVO'])}  
+        VRI：{curr['VRI']:.2f} {arrow(curr['VRI'], prev['VRI'])}  
+        Slope_Z：{sz:.2f} {arrow(sz, get_four_dimension_advice(df, len(df)-2)[2])}  
+        """)
+
+
+# ============================================================
+# 單股分析
+# ============================================================
+if run_btn and mode == "單股分析":
+
+    st.subheader("📌 單股即時分析 + 一年完整交易回測")
+
+    symbol = get_taiwan_symbol(ticker_input)
+    df = get_indicator_data(symbol, start_1y, end_dt)
+
+    if df is None or len(df) < 150:
+        st.warning("資料不足")
+    else:
+        df["Close"] = df["Close"].round(0).astype(int) if ".TW" in symbol else df["Close"].round(2)
+
+        op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
+        status, _ = map_status(op, sz)
+        curr = df.iloc[-1]
+        prev = df.iloc[-2]
+
+        def arrow(v, p):
+            if v > p: return "↑"
+            if v < p: return "↓"
+            return "→"
+
+        st.markdown(f"""
+        ### 🎯 {ticker_input} 當前狀態（截至 {target_date}）  
+        狀態：**{status}**  
+        操作建議：{op}  
+        """)
+
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("收盤價", f"{curr['Close']}")
+        col2.metric("PVO", f"{curr['PVO']:.2f} {arrow(curr['PVO'], prev['PVO'])}")
+        col3.metric("VRI", f"{curr['VRI']:.2f} {arrow(curr['VRI'], prev['VRI'])}")
+        col4.metric("Slope_Z", f"{sz:.2f} {arrow(sz, get_four_dimension_advice(df, len(df)-2)[2])}")
+        col5.metric("Score_Z", f"{scz:.2f}")
+
+        # === 回測區 ===
+        st.divider()
+        st.subheader("📊 最近一年所有交易明細")
+
+        df_trades, df_summary = backtest_all_trades(df)
+
+        if df_trades is None:
+            st.info("一年內沒有完整交易紀錄")
+        else:
+            st.dataframe(df_trades, use_container_width=True, height=400)
+            st.dataframe(df_summary, use_container_width=True)
+
+
+# ============================================================
+# 台股市場分析 / 美股市場分析
+# ============================================================
+if run_btn and mode in ["台股市場分析", "美股市場分析"]:
+
+    st.subheader("📊 市場整體強弱分析")
+
+    watch = TAIWAN_LIST if mode == "台股市場分析" else US_LIST
+    results = []
+
+    for sym in watch:
+
+        df = get_indicator_data(sym, start_1y, end_dt)
+        if df is None or len(df) < 150:
+            continue
+
+        op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
+        status, _ = map_status(op, sz)
+        curr = df.iloc[-1]
+
+        results.append({
+            "代號": sym,
+            "收盤": round(curr["Close"], 2),
+            "狀態": status,
+            "Slope_Z": round(sz, 2),
+            "Score_Z": round(scz, 2),
+        })
+
+    if results:
+        st.dataframe(pd.DataFrame(results), use_container_width=True)
+    else:
+        st.warning("市場清單沒有可用資料")
