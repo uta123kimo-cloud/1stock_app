@@ -98,6 +98,8 @@ def backtest_all_trades(df):
     observe_count = 0
 
     reach_10 = reach_20 = reach_m10 = None
+    date_10 = date_20 = date_m10 = None
+    close_10 = close_20 = close_m10 = None
 
     for i in range(len(df)):
 
@@ -111,26 +113,35 @@ def backtest_all_trades(df):
             entry_idx = i
             entry_price = price
             observe_count = 0
-            reach_10 = reach_20 = reach_m10 = None
+
+            reach_10 = reach_20 = reach_m10 = "未達"
+            date_10 = date_20 = date_m10 = None
+            close_10 = close_20 = close_m10 = None
             continue
 
         # === 持倉中 ===
         if in_trade:
 
-            # 逐日檢查買進後的每一天 Close
-            future_window = df.iloc[entry_idx:i+1]["Close"]
-            reach_10 = reach_20 = reach_m10 = "未達"
+            future_window = df.iloc[entry_idx:i+1][["Close"]]
 
-            for j, close in enumerate(future_window, start=1):
-                ret = (close / entry_price - 1) * 100
+            # 每日檢查是否達標
+            for j, (idx, row) in enumerate(future_window.iterrows(), start=1):
+                ret = (row["Close"] / entry_price - 1) * 100
+
                 if reach_10 == "未達" and ret >= 10:
                     reach_10 = j if j <= 100 else "百無"
+                    date_10 = idx.strftime("%Y-%m-%d")
+                    close_10 = row["Close"]
                 if reach_20 == "未達" and ret >= 20:
                     reach_20 = j if j <= 100 else "百無"
+                    date_20 = idx.strftime("%Y-%m-%d")
+                    close_20 = row["Close"]
                 if reach_m10 == "未達" and ret <= -10:
                     reach_m10 = j if j <= 100 else "百無"
+                    date_m10 = idx.strftime("%Y-%m-%d")
+                    close_m10 = row["Close"]
 
-            # === 出場條件（完全保留原邏輯）===
+            # === 出場條件 ===
             exit_flag = False
             if "空單進場" in status or sz < -1:
                 exit_flag = True
@@ -141,7 +152,7 @@ def backtest_all_trades(df):
             else:
                 observe_count = 0
 
-            # === 出場 ===
+            # === 出場處理 ===
             if exit_flag:
 
                 exit_idx = i
@@ -149,17 +160,22 @@ def backtest_all_trades(df):
                 trade_days = exit_idx - entry_idx + 1
                 total_ret = (exit_price / entry_price - 1) * 100
 
-                # 🔧 再保險：出場當天完整檢查未來 Close 是否達標
-                future_window = df.iloc[entry_idx:exit_idx+1]["Close"]
-                reach_10 = reach_20 = reach_m10 = "未達"
-                for j, close in enumerate(future_window, start=1):
-                    ret = (close / entry_price - 1) * 100
+                # 再次檢查最後一天是否達標
+                future_window = df.iloc[entry_idx:exit_idx+1][["Close"]]
+                for j, (idx, row) in enumerate(future_window.iterrows(), start=1):
+                    ret = (row["Close"] / entry_price - 1) * 100
                     if reach_10 == "未達" and ret >= 10:
                         reach_10 = j if j <= 100 else "百無"
+                        date_10 = idx.strftime("%Y-%m-%d")
+                        close_10 = row["Close"]
                     if reach_20 == "未達" and ret >= 20:
                         reach_20 = j if j <= 100 else "百無"
+                        date_20 = idx.strftime("%Y-%m-%d")
+                        close_20 = row["Close"]
                     if reach_m10 == "未達" and ret <= -10:
                         reach_m10 = j if j <= 100 else "百無"
+                        date_m10 = idx.strftime("%Y-%m-%d")
+                        close_m10 = row["Close"]
 
                 trades.append({
                     "進場日": df.iloc[entry_idx].name.strftime("%Y-%m-%d"),
@@ -167,19 +183,28 @@ def backtest_all_trades(df):
                     "交易天數": trade_days,
                     "報酬率%": round(total_ret, 2),
                     "+10% 天數": reach_10,
+                    "+10% 日期": date_10,
+                    "+10% 收盤價": close_10,
                     "+20% 天數": reach_20,
+                    "+20% 日期": date_20,
+                    "+20% 收盤價": close_20,
                     "-10% 天數": reach_m10,
+                    "-10% 日期": date_m10,
+                    "-10% 收盤價": close_m10,
                 })
 
                 equity.append(equity[-1] * (1 + total_ret / 100))
 
+                # 重置持倉
                 in_trade = False
                 observe_count = 0
                 entry_idx = None
                 entry_price = None
                 reach_10 = reach_20 = reach_m10 = None
+                date_10 = date_20 = date_m10 = None
+                close_10 = close_20 = close_m10 = None
 
-    # 🔥 最後一筆尚未出場 → 強制平倉
+    # 最後一筆尚未出場 → 強制平倉
     if in_trade:
 
         exit_idx = len(df) - 1
@@ -187,16 +212,25 @@ def backtest_all_trades(df):
         trade_days = exit_idx - entry_idx + 1
         total_ret = (exit_price / entry_price - 1) * 100
 
-        future_window = df.iloc[entry_idx:]["Close"]
+        future_window = df.iloc[entry_idx:][["Close"]]
         reach_10 = reach_20 = reach_m10 = "未達"
-        for j, close in enumerate(future_window, start=1):
-            ret = (close / entry_price - 1) * 100
+        date_10 = date_20 = date_m10 = None
+        close_10 = close_20 = close_m10 = None
+
+        for j, (idx, row) in enumerate(future_window.iterrows(), start=1):
+            ret = (row["Close"] / entry_price - 1) * 100
             if reach_10 == "未達" and ret >= 10:
                 reach_10 = j if j <= 100 else "百無"
+                date_10 = idx.strftime("%Y-%m-%d")
+                close_10 = row["Close"]
             if reach_20 == "未達" and ret >= 20:
                 reach_20 = j if j <= 100 else "百無"
+                date_20 = idx.strftime("%Y-%m-%d")
+                close_20 = row["Close"]
             if reach_m10 == "未達" and ret <= -10:
                 reach_m10 = j if j <= 100 else "百無"
+                date_m10 = idx.strftime("%Y-%m-%d")
+                close_m10 = row["Close"]
 
         trades.append({
             "進場日": df.iloc[entry_idx].name.strftime("%Y-%m-%d"),
@@ -204,8 +238,14 @@ def backtest_all_trades(df):
             "交易天數": trade_days,
             "報酬率%": round(total_ret, 2),
             "+10% 天數": reach_10,
+            "+10% 日期": date_10,
+            "+10% 收盤價": close_10,
             "+20% 天數": reach_20,
+            "+20% 日期": date_20,
+            "+20% 收盤價": close_20,
             "-10% 天數": reach_m10,
+            "-10% 日期": date_m10,
+            "-10% 收盤價": close_m10,
         })
 
         equity.append(equity[-1] * (1 + total_ret / 100))
