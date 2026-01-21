@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
-from analysis_engine import get_indicator_data, get_taiwan_symbol, get_advice
+from analysis_engine import get_indicator_data, get_taiwan_symbol
 from backtest_5d import get_four_dimension_advice
 from config import WATCH_LIST as TAIWAN_LIST
 from configA import WATCH_LIST as US_LIST
@@ -23,7 +23,7 @@ table td {font-size:14px !important;}
 """, unsafe_allow_html=True)
 
 # ===================================================================
-# 狀態分類（保持與 analysis_engine.py 對應）
+# 狀態分類
 # ===================================================================
 def map_status(op_text, slope_z):
     if "做空" in op_text or "空單" in op_text:
@@ -55,7 +55,7 @@ with st.sidebar:
     run_btn = st.button("開始分析")
 
 # ===================================================================
-# 回測時間設定（固定 1 年）
+# 回測時間設定
 # ===================================================================
 LOOKBACK_1Y = 365
 if isinstance(target_date, datetime):
@@ -63,16 +63,6 @@ if isinstance(target_date, datetime):
 else:
     end_dt = datetime.strptime(str(target_date), "%Y-%m-%d") + timedelta(days=1)
 start_1y = end_dt - timedelta(days=LOOKBACK_1Y)
-
-# ===================================================================
-# 天數顯示工具
-# ===================================================================
-def format_days(x):
-    if x is None:
-        return ""
-    if x > 100:
-        return "百"
-    return int(x)
 
 # ===================================================================
 # 安全取得指標值 & 收盤價格式化
@@ -96,7 +86,7 @@ def format_price(symbol, price):
     return round(price,2) if price is not None else "未提供"
 
 # ===================================================================
-# 多交易回測引擎（保持原邏輯）
+# 多交易回測引擎（修改顯示進場+出場價、10%/20%/-10%日期+價位）
 # ===================================================================
 def backtest_all_trades(df):
     trades = []
@@ -106,11 +96,13 @@ def backtest_all_trades(df):
     entry_price = None
     observe_count = 0
     reach_10 = reach_20 = reach_m10 = None
+    date_10 = date_20 = date_m10 = None
 
     for i in range(len(df)):
         op, last, sz, scz = get_four_dimension_advice(df, i)
         status, _ = map_status(op, sz)
         price = df.iloc[i]["Close"]
+        date = df.index[i]
 
         # === 進場 ===
         if not in_trade and status == "⭐ 多單進場":
@@ -119,16 +111,21 @@ def backtest_all_trades(df):
             entry_price = price
             observe_count = 0
             reach_10 = reach_20 = reach_m10 = None
+            date_10 = date_20 = date_m10 = None
             continue
 
         # === 持倉中 ===
         if in_trade:
-            days = i - entry_idx + 1
             ret = (price / entry_price - 1) * 100
-
-            if reach_10 is None and ret >= 10: reach_10 = days
-            if reach_20 is None and ret >= 20: reach_20 = days
-            if reach_m10 is None and ret <= -10: reach_m10 = days
+            if reach_10 is None and price >= entry_price*1.1: 
+                reach_10 = round(entry_price*1.1,2)
+                date_10 = date.strftime("%Y-%m-%d")
+            if reach_20 is None and price >= entry_price*1.2: 
+                reach_20 = round(entry_price*1.2,2)
+                date_20 = date.strftime("%Y-%m-%d")
+            if reach_m10 is None and price <= entry_price*0.9: 
+                reach_m10 = round(entry_price*0.9,2)
+                date_m10 = date.strftime("%Y-%m-%d")
 
             exit_flag = False
             if "空單進場" in status or sz < -1:
@@ -146,13 +143,13 @@ def backtest_all_trades(df):
                 trade_days = exit_idx - entry_idx + 1
                 total_ret = (exit_price / entry_price - 1) * 100
                 trades.append({
-                    "進場日": df.iloc[entry_idx].name.strftime("%Y-%m-%d"),
-                    "出場日": df.iloc[exit_idx].name.strftime("%Y-%m-%d"),
-                    "交易天數": format_days(trade_days),
+                    "進場日+價位": f"{df.index[entry_idx].strftime('%Y-%m-%d')} {entry_price:.2f}",
+                    "出場日+價位": f"{df.index[exit_idx].strftime('%Y-%m-%d')} {exit_price:.2f}",
+                    "交易天數": trade_days,
                     "報酬率%": round(total_ret,2),
-                    "+10% 天數": format_days(reach_10),
-                    "+20% 天數": format_days(reach_20),
-                    "-10% 天數": format_days(reach_m10),
+                    "+10%": f"{date_10} {reach_10}" if reach_10 else "",
+                    "+20%": f"{date_20} {reach_20}" if reach_20 else "",
+                    "-10%": f"{date_m10} {reach_m10}" if reach_m10 else "",
                 })
                 equity.append(equity[-1]*(1+total_ret/100))
                 in_trade = False
@@ -160,70 +157,37 @@ def backtest_all_trades(df):
                 entry_idx = None
                 entry_price = None
                 reach_10 = reach_20 = reach_m10 = None
+                date_10 = date_20 = date_m10 = None
 
-    # 🔥 最後一筆尚未出場 → 強制平倉
+    # 🔥 最後一筆尚未出場
     if in_trade:
-        exit_idx = len(df) - 1
+        exit_idx = len(df)-1
         exit_price = df.iloc[-1]["Close"]
-        trade_days = exit_idx - entry_idx + 1
-        total_ret = (exit_price / entry_price - 1) * 100
         trades.append({
-            "進場日": df.iloc[entry_idx].name.strftime("%Y-%m-%d"),
-            "出場日": df.iloc[-1].name.strftime("%Y-%m-%d"),
-            "交易天數": format_days(trade_days),
-            "報酬率%": round(total_ret,2),
-            "+10% 天數": format_days(reach_10),
-            "+20% 天數": format_days(reach_20),
-            "-10% 天數": format_days(reach_m10),
+            "進場日+價位": f"{df.index[entry_idx].strftime('%Y-%m-%d')} {entry_price:.2f}",
+            "出場日+價位": f"{df.index[exit_idx].strftime('%Y-%m-%d')} {exit_price:.2f}",
+            "交易天數": exit_idx - entry_idx +1,
+            "報酬率%": round((exit_price/entry_price-1)*100,2),
+            "+10%": f"{date_10} {reach_10}" if reach_10 else "",
+            "+20%": f"{date_20} {reach_20}" if reach_20 else "",
+            "-10%": f"{date_m10} {reach_m10}" if reach_m10 else "",
         })
-        equity.append(equity[-1]*(1+total_ret/100))
 
     if not trades: return None, None
     df_trades = pd.DataFrame(trades)
-    win_rate = (df_trades["報酬率%"]>0).mean()*100
-    avg_ret = df_trades["報酬率%"].mean()
-    max_win = df_trades["報酬率%"].max()
-    max_loss = df_trades["報酬率%"].min()
-    summary = {
+    summary = pd.DataFrame([{
         "交易次數": len(df_trades),
-        "勝率%": round(win_rate,2),
-        "平均報酬%": round(avg_ret,2),
-        "最大獲利%": round(max_win,2),
-        "最大虧損%": round(max_loss,2),
-    }
-    return df_trades, pd.DataFrame([summary])
+        "勝率%": round((df_trades["報酬率%"]>0).mean()*100,2),
+        "平均報酬%": round(df_trades["報酬率%"].mean(),2),
+        "最大獲利%": round(df_trades["報酬率%"].max(),2),
+        "最大虧損%": round(df_trades["報酬率%"].min(),2),
+    }])
+    return df_trades, summary
 
 # ===================================================================
 # 主畫面
 # ===================================================================
 st.title("🛡️ SJ 四維量價分析系統")
-
-# ============================================================
-# 首頁四大指數（含 ↑ ↓ 與正確小數）
-# ============================================================
-st.subheader("📊 主要指數即時狀態")
-INDEX_LIST = {
-    "台股大盤": "^TWII",
-    "0050": "0050.TW",
-    "那斯達克": "^IXIC",
-    "費半": "^SOX"
-}
-cols = st.columns(4)
-for col, (name, sym) in zip(cols, INDEX_LIST.items()):
-    df = get_indicator_data(sym, start_1y, end_dt)
-    if df is not None and len(df)>50:
-        curr = df.iloc[-1].to_dict()
-        prev = df.iloc[-2].to_dict()
-        op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
-        status, _ = map_status(op, sz)
-        price = format_price(sym, curr.get("Close", np.nan))
-        col.markdown(f"""
-        **{name}** 收盤：{price} 
-        狀態：{status} 
-        PVO：{safe_get_value(curr,'PVO',prev)} 
-        VRI：{safe_get_value(curr,'VRI',prev)} 
-        Slope_Z：{safe_get_value(curr,'Slope_Z',{'Slope_Z': get_four_dimension_advice(df,len(df)-2)[2]})}
-        """)
 
 # ============================================================
 # 單股分析
@@ -235,17 +199,12 @@ if run_btn and mode=="單股分析":
     if df is None or len(df)<150:
         st.warning("資料不足")
     else:
-        # 調整收盤精度
         df["Close"] = df["Close"].apply(lambda x: format_price(symbol,x))
         op, last, sz, scz = get_four_dimension_advice(df,len(df)-1)
         status, _ = map_status(op, sz)
         curr = df.iloc[-1].to_dict()
         prev = df.iloc[-2].to_dict()
-        st.markdown(f"""
-        ### 🎯 {ticker_input} 當前狀態（截至 {target_date}）
-        狀態：**{status}**
-        操作建議：{op}
-        """)
+        st.markdown(f"### 🎯 {ticker_input} 當前狀態（截至 {target_date}）\n狀態：**{status}**\n操作建議：{op}")
         col1,col2,col3,col4,col5 = st.columns(5)
         col1.metric("收盤價", f"{curr.get('Close','未提供')}")
         col2.metric("PVO", safe_get_value(curr,'PVO',prev))
@@ -253,7 +212,6 @@ if run_btn and mode=="單股分析":
         col4.metric("Slope_Z", safe_get_value(curr,'Slope_Z',{'Slope_Z': get_four_dimension_advice(df,len(df)-2)[2]}))
         col5.metric("Score_Z", f"{scz:.2f}")
 
-        # 回測區
         st.divider()
         st.subheader("📊 最近一年所有交易明細")
         df_trades, df_summary = backtest_all_trades(df)
@@ -264,14 +222,17 @@ if run_btn and mode=="單股分析":
             st.dataframe(df_summary,use_container_width=True)
 
 # ============================================================
-# 台股市場分析 / 美股市場分析
+# 市場分析
 # ============================================================
 if run_btn and mode in ["台股市場分析","美股市場分析"]:
     st.subheader("📊 市場整體強弱分析")
     watch = TAIWAN_LIST if mode=="台股市場分析" else US_LIST
     results = []
+    status_count = {}
+    prev_status_count = {}
+
     for sym in watch:
-        symbol = get_taiwan_symbol(sym)  # 🔹 自動判斷 .TW/.TWO
+        symbol = get_taiwan_symbol(sym)
         df = get_indicator_data(symbol, start_1y, end_dt)
         if df is None or len(df)<150:
             continue
@@ -282,10 +243,28 @@ if run_btn and mode in ["台股市場分析","美股市場分析"]:
             "代號": sym,
             "收盤": format_price(symbol,curr.get("Close",np.nan)),
             "狀態": status,
+            "PVO": safe_get_value(curr,'PVO',None),
+            "VRI": safe_get_value(curr,'VRI',None),
             "Slope_Z": round(sz,2),
             "Score_Z": round(scz,2),
         })
+        status_count[status] = status_count.get(status,0)+1
+
+        # 昨日比較
+        if len(df)>1:
+            op_prev, _, sz_prev, _ = get_four_dimension_advice(df,len(df)-2)
+            status_prev, _ = map_status(op_prev, sz_prev)
+            prev_status_count[status_prev] = prev_status_count.get(status_prev,0)+1
+
+    # 顯示結果表
     if results:
         st.dataframe(pd.DataFrame(results),use_container_width=True)
+        # 狀態統計
+        count_df = pd.DataFrame([
+            {"狀態": k, "數量": v, "昨日比較": f"{v - prev_status_count.get(k,0)} ↑" if v - prev_status_count.get(k,0)>0 else f"{v - prev_status_count.get(k,0)}"} 
+            for k,v in status_count.items()
+        ])
+        st.subheader("📈 狀態統計")
+        st.dataframe(count_df,use_container_width=True)
     else:
         st.warning("市場清單沒有可用資料")
