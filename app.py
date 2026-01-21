@@ -94,33 +94,7 @@ st.title("🛡️ SJ 四維量價分析系統")
 # 首頁四大指數（含 ↑ ↓ 與正確小數，增加 PVO/VRI 與昨日比較箭頭）
 # ============================================================
 st.subheader("📊 主要指數即時狀態")
-INDEX_LIST = {
-    "台股大盤": "^TWII",
-    "0050": "0050.TW",
-    "那斯達克": "^IXIC",
-    "費半": "^SOX"
-}
-
-cols = st.columns(4)
-for col, (name, sym) in zip(cols, INDEX_LIST.items()):
-    df = get_indicator_data(sym, start_1y, end_dt)
-    if df is not None and len(df)>50:
-        curr = df.iloc[-1].to_dict()
-        prev = df.iloc[-2].to_dict() if len(df) > 1 else None
-        op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
-        status, _ = map_status(op, sz)
-        price = format_price(sym, curr.get("Close", np.nan))
-        pvo_val = safe_get_value(curr,'PVO',prev)
-        vri_val = safe_get_value(curr,'VRI',prev)
-        slope_val = safe_get_value(curr,'Slope_Z',{'Slope_Z': get_four_dimension_advice(df,len(df)-2)[2]})
-        col.markdown(f"""
-        **{name}** 收盤：{price} 
-        狀態：{status} 
-        PVO：{pvo_val} 
-        VRI：{vri_val} 
-        Slope_Z：{slope_val}
-        """)
-
+INDEX_LIST = { "台股大盤": "^TWII", "0050": "0050.TW", "那斯達克": "^IXIC", "費半": "^SOX" } cols = st.columns(4) for col, (name, sym) in zip(cols, INDEX_LIST.items()): df = get_indicator_data(sym, start_1y, end_dt) if df is not None and len(df) > 50: curr = df.iloc[-1].to_dict() prev = df.iloc[-2].to_dict() op, last, sz, scz = get_four_dimension_advice(df, len(df)-1) status, _ = map_status(op, sz) price = format_price(sym, curr.get("Close", np.nan)) col.markdown(f""" **{name}** 收盤：{price} 狀態：{status} PVO：{safe_get_value(curr, 'PVO', prev)} VRI：{safe_get_value(curr, 'VRI', prev)} Slope_Z：{safe_get_value(curr, 'Slope_Z', {'Slope_Z': get_four_dimension_advice(df, len(df)-2)[2]})} """)
 # ============================================================
 # 單股分析（僅顯示當前狀態 + PVO/VRI/Slope_Z/Score_Z）
 # ============================================================
