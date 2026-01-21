@@ -42,6 +42,16 @@ def map_status(op_text, slope_z):
     else:
         return "⚠️ 空頭觀望", 4
 
+# 狀態排序強弱（只用於市場排序，不影響原邏輯）
+STATUS_RANK = {
+    "⭐ 多單進場": 1,
+    "✅ 多單續抱": 2,
+    "⚠️ 多頭觀望": 3,
+    "⚠️ 空手觀望": 4,
+    "🔻 空單進場": 5,
+    "⚠️ 空頭觀望": 6,
+}
+
 # ===================================================================
 # 側邊欄
 # ===================================================================
@@ -81,9 +91,11 @@ def safe_get_value(curr, key, prev=None):
     return round(val,2) if isinstance(val, (int,float)) else val
 
 def format_price(symbol, price):
+    if price is None or (isinstance(price,float) and np.isnan(price)):
+        return "未提供"
     if ".TW" in symbol or ".TWO" in symbol:
-        return int(round(price,0)) if price is not None else "未提供"
-    return round(price,2) if price is not None else "未提供"
+        return int(round(price,0))
+    return round(price,2)
 
 # ===================================================================
 # 主畫面
@@ -91,7 +103,7 @@ def format_price(symbol, price):
 st.title("🛡️ SJ 四維量價分析系統")
 
 # ============================================================
-# 首頁四大指數（含 ↑ ↓ 與正確小數，增加 PVO/VRI 與昨日比較箭頭）
+# 首頁四大指數（含 ↑ ↓ 與正確小數，增加 PVO/VRI 與昨日比較箭頭，修正費半空值）
 # ============================================================
 st.subheader("📊 主要指數即時狀態")
 INDEX_LIST = {
@@ -109,7 +121,7 @@ for col, (name, sym) in zip(cols, INDEX_LIST.items()):
     if df is not None and len(df) > 50:
 
         curr = df.iloc[-1].to_dict()
-        prev = df.iloc[-2].to_dict()
+        prev = df.iloc[-2].to_dict() if len(df)>1 else None
 
         op, last, sz, scz = get_four_dimension_advice(df, len(df)-1)
         status, _ = map_status(op, sz)
@@ -124,8 +136,9 @@ for col, (name, sym) in zip(cols, INDEX_LIST.items()):
         VRI：{safe_get_value(curr, 'VRI', prev)}  
         Slope_Z：{safe_get_value(curr, 'Slope_Z', {'Slope_Z': get_four_dimension_advice(df, len(df)-2)[2]})}  
         """)
+
 # ============================================================
-# 單股分析（僅顯示當前狀態 + PVO/VRI/Slope_Z/Score_Z）
+# 單股分析（原樣保留）
 # ============================================================
 if run_btn and mode=="單股分析":
     st.subheader("📌 單股即時分析")
@@ -148,7 +161,7 @@ if run_btn and mode=="單股分析":
         col5.metric("Score_Z", f"{scz:.2f}")
 
 # ============================================================
-# 台股市場分析 / 美股市場分析（增加 PVO/VRI + 狀態統計 + 昨日比較箭頭）
+# 台股市場分析 / 美股市場分析（排序 + 狀態統計 + 昨日比較 ↑ + PVO/VRI）
 # ============================================================
 if run_btn and mode in ["台股市場分析","美股市場分析"]:
     st.subheader("📊 市場整體強弱分析")
@@ -162,9 +175,11 @@ if run_btn and mode in ["台股市場分析","美股市場分析"]:
         df = get_indicator_data(symbol, start_1y, end_dt)
         if df is None or len(df)<150:
             continue
+
         op, last, sz, scz = get_four_dimension_advice(df,len(df)-1)
         status, _ = map_status(op, sz)
         curr = df.iloc[-1].to_dict()
+
         results.append({
             "代號": sym,
             "收盤": format_price(symbol,curr.get("Close",np.nan)),
@@ -173,7 +188,9 @@ if run_btn and mode in ["台股市場分析","美股市場分析"]:
             "VRI": safe_get_value(curr,'VRI',None),
             "Slope_Z": round(sz,2),
             "Score_Z": round(scz,2),
+            "_rank": STATUS_RANK.get(status,99)
         })
+
         status_count[status] = status_count.get(status,0)+1
 
         # 昨日比較
@@ -182,15 +199,24 @@ if run_btn and mode in ["台股市場分析","美股市場分析"]:
             status_prev, _ = map_status(op_prev, sz_prev)
             prev_status_count[status_prev] = prev_status_count.get(status_prev,0)+1
 
-    # 顯示結果表
+    # 顯示結果表（依強弱排序）
     if results:
-        st.dataframe(pd.DataFrame(results),use_container_width=True)
-        # 狀態統計
-        count_df = pd.DataFrame([
-            {"狀態": k, "數量": v, "昨日比較": f"{v - prev_status_count.get(k,0)} ↑" if v - prev_status_count.get(k,0)>0 else f"{v - prev_status_count.get(k,0)}"} 
-            for k,v in status_count.items()
-        ])
+        df_show = pd.DataFrame(results).sort_values("_rank").drop(columns=["_rank"])
+        st.dataframe(df_show, use_container_width=True)
+
+        # 狀態統計（含昨日 ↑）
+        count_rows = []
+        for k,v in status_count.items():
+            diff = v - prev_status_count.get(k,0)
+            arrow = " ↑" if diff > 0 else ""
+            count_rows.append({
+                "狀態": k,
+                "數量": v,
+                "昨日比較": f"{diff}{arrow}"
+            })
+
         st.subheader("📈 狀態統計")
-        st.dataframe(count_df,use_container_width=True)
+        st.dataframe(pd.DataFrame(count_rows), use_container_width=True)
+
     else:
         st.warning("市場清單沒有可用資料")
