@@ -117,23 +117,21 @@ def backtest_all_trades(df):
         # === 持倉中 ===
         if in_trade:
 
-            days = i - entry_idx + 1
+            # 逐日檢查買進後的每一天 Close
+            future_window = df.iloc[entry_idx:i+1]["Close"]
+            reach_10 = reach_20 = reach_m10 = "未達"
 
-            # 🔥 關鍵修正：只要未出場，就看未來所有 Close 是否曾達標
-            future_window = df.iloc[entry_idx:]["Close"]
-            max_ret = (future_window.max() / entry_price - 1) * 100
-            min_ret = (future_window.min() / entry_price - 1) * 100
+            for j, close in enumerate(future_window, start=1):
+                ret = (close / entry_price - 1) * 100
+                if reach_10 == "未達" and ret >= 10:
+                    reach_10 = j if j <= 100 else "百無"
+                if reach_20 == "未達" and ret >= 20:
+                    reach_20 = j if j <= 100 else "百無"
+                if reach_m10 == "未達" and ret <= -10:
+                    reach_m10 = j if j <= 100 else "百無"
 
-            if reach_10 is None and max_ret >= 10:
-                reach_10 = days
-            if reach_20 is None and max_ret >= 20:
-                reach_20 = days
-            if reach_m10 is None and min_ret <= -10:
-                reach_m10 = days
-
-            # === 出場條件（完全不動你的邏輯）===
+            # === 出場條件（完全保留原邏輯）===
             exit_flag = False
-
             if "空單進場" in status or sz < -1:
                 exit_flag = True
             elif "觀望" in status:
@@ -151,26 +149,26 @@ def backtest_all_trades(df):
                 trade_days = exit_idx - entry_idx + 1
                 total_ret = (exit_price / entry_price - 1) * 100
 
-                # 🔧 再保險一次：出場當天完整檢查未來 Close 是否曾達標
+                # 🔧 再保險：出場當天完整檢查未來 Close 是否達標
                 future_window = df.iloc[entry_idx:exit_idx+1]["Close"]
-                max_ret = (future_window.max() / entry_price - 1) * 100
-                min_ret = (future_window.min() / entry_price - 1) * 100
-
-                if reach_10 is None and max_ret >= 10:
-                    reach_10 = trade_days
-                if reach_20 is None and max_ret >= 20:
-                    reach_20 = trade_days
-                if reach_m10 is None and min_ret <= -10:
-                    reach_m10 = trade_days
+                reach_10 = reach_20 = reach_m10 = "未達"
+                for j, close in enumerate(future_window, start=1):
+                    ret = (close / entry_price - 1) * 100
+                    if reach_10 == "未達" and ret >= 10:
+                        reach_10 = j if j <= 100 else "百無"
+                    if reach_20 == "未達" and ret >= 20:
+                        reach_20 = j if j <= 100 else "百無"
+                    if reach_m10 == "未達" and ret <= -10:
+                        reach_m10 = j if j <= 100 else "百無"
 
                 trades.append({
                     "進場日": df.iloc[entry_idx].name.strftime("%Y-%m-%d"),
                     "出場日": df.iloc[exit_idx].name.strftime("%Y-%m-%d"),
-                    "交易天數": format_days(trade_days),
+                    "交易天數": trade_days,
                     "報酬率%": round(total_ret, 2),
-                    "+10% 天數": format_days(reach_10),
-                    "+20% 天數": format_days(reach_20),
-                    "-10% 天數": format_days(reach_m10),
+                    "+10% 天數": reach_10,
+                    "+20% 天數": reach_20,
+                    "-10% 天數": reach_m10,
                 })
 
                 equity.append(equity[-1] * (1 + total_ret / 100))
@@ -190,24 +188,24 @@ def backtest_all_trades(df):
         total_ret = (exit_price / entry_price - 1) * 100
 
         future_window = df.iloc[entry_idx:]["Close"]
-        max_ret = (future_window.max() / entry_price - 1) * 100
-        min_ret = (future_window.min() / entry_price - 1) * 100
-
-        if reach_10 is None and max_ret >= 10:
-            reach_10 = trade_days
-        if reach_20 is None and max_ret >= 20:
-            reach_20 = trade_days
-        if reach_m10 is None and min_ret <= -10:
-            reach_m10 = trade_days
+        reach_10 = reach_20 = reach_m10 = "未達"
+        for j, close in enumerate(future_window, start=1):
+            ret = (close / entry_price - 1) * 100
+            if reach_10 == "未達" and ret >= 10:
+                reach_10 = j if j <= 100 else "百無"
+            if reach_20 == "未達" and ret >= 20:
+                reach_20 = j if j <= 100 else "百無"
+            if reach_m10 == "未達" and ret <= -10:
+                reach_m10 = j if j <= 100 else "百無"
 
         trades.append({
             "進場日": df.iloc[entry_idx].name.strftime("%Y-%m-%d"),
             "出場日": df.iloc[exit_idx].name.strftime("%Y-%m-%d"),
-            "交易天數": format_days(trade_days),
+            "交易天數": trade_days,
             "報酬率%": round(total_ret, 2),
-            "+10% 天數": format_days(reach_10),
-            "+20% 天數": format_days(reach_20),
-            "-10% 天數": format_days(reach_m10),
+            "+10% 天數": reach_10,
+            "+20% 天數": reach_20,
+            "-10% 天數": reach_m10,
         })
 
         equity.append(equity[-1] * (1 + total_ret / 100))
