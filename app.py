@@ -84,21 +84,19 @@ def format_days(x):
 # ===================================================================
 # 多交易回測引擎（🔥 完整穩定修正版 🔥）
 # ===================================================================
-def format_reach_status(days, reach_date, reach_price, trade_status="已結束"):
+def format_reach_status(days, reach_price, reach_date, trade_status, label):
     """
-    處理達標顯示邏輯：
-    1. 超過 100 天未達標 -> '百無'
-    2. 交易結束仍未達標 -> '未達'
-    3. 達標 -> 顯示 '第N天 (價格, 日期)'
+    格式化顯示邏輯：
+    1. 達標 -> 顯示 第 N 天 (價格, 日期)
+    2. 未達標但超過 100 天 -> 顯示 '百無'
+    3. 未達標且在 100 天內 -> 顯示 '未達'
     """
     if days is not None:
         if days > 100:
             return "百無"
         return f"第 {days} 天 ({reach_price}, {reach_date})"
     
-    # 若尚未標記天數，判斷是回測時間太短還是真的沒達到
-    if trade_status == "持倉中":
-        return "未達"
+    # 未達標的情況
     return "未達"
 
 def backtest_all_trades(df):
@@ -113,9 +111,10 @@ def backtest_all_trades(df):
     entry_price = None
     observe_count = 0
 
-    # 紀錄達標資訊
+    # 追蹤達標數據
     reach_10_days = reach_20_days = reach_m10_days = None
-    reach_10_info = reach_20_info = reach_m10_info = (None, None)
+    reach_10_price = reach_20_price = reach_m10_price = None
+    reach_10_date = reach_20_date = reach_m10_date = None
 
     for i in range(len(df)):
         op, last, sz, scz = get_four_dimension_advice(df, i)
@@ -123,34 +122,39 @@ def backtest_all_trades(df):
         current_price = df.iloc[i]["Close"]
         current_date = df.index[i].strftime("%Y-%m-%d")
 
-        # === 進場 ===
+        # === 進場邏輯 ===
         if not in_trade and status == "⭐ 多單進場":
             in_trade = True
             entry_idx = i
             entry_price = current_price
             observe_count = 0
+            # 重置所有達標狀態
             reach_10_days = reach_20_days = reach_m10_days = None
-            reach_10_info = reach_20_info = reach_m10_info = (None, None)
             continue
 
-        # === 持倉中 ===
+        # === 持倉邏輯 ===
         if in_trade:
-            days_held = i - entry_idx + 1 # 包含進場當天為第1天
+            days_held = i - entry_idx + 1
             
-            # 檢查是否達標 (僅紀錄第一次達標)
+            # 檢測 +10%
             if reach_10_days is None and current_price >= entry_price * 1.10:
                 reach_10_days = days_held
-                reach_10_info = (current_price, current_date)
+                reach_10_price = current_price
+                reach_10_date = current_date
             
+            # 檢測 +20%
             if reach_20_days is None and current_price >= entry_price * 1.20:
                 reach_20_days = days_held
-                reach_20_info = (current_price, current_date)
-                
+                reach_20_price = current_price
+                reach_20_date = current_date
+
+            # 檢測 -10%
             if reach_m10_days is None and current_price <= entry_price * 0.90:
                 reach_m10_days = days_held
-                reach_m10_info = (current_price, current_date)
+                reach_m10_price = current_price
+                reach_m10_date = current_date
 
-            # === 出場條件檢查 ===
+            # --- 出場判定 ---
             exit_flag = False
             if "空單進場" in status or sz < -1:
                 exit_flag = True
@@ -161,12 +165,8 @@ def backtest_all_trades(df):
             else:
                 observe_count = 0
 
-            # 如果達到最後一筆資料，強制平倉並標記為「持倉中」的未達狀態判斷
-            is_final_row = (i == len(df) - 1)
-            
-            if exit_flag or is_final_row:
-                trade_status = "持倉中" if (is_final_row and not exit_flag) else "已結束"
-                
+            # --- 執行結算 (包含最後一天強制平倉) ---
+            if exit_flag or (i == len(df) - 1):
                 exit_idx = i
                 exit_price = current_price
                 total_ret = (exit_price / entry_price - 1) * 100
@@ -178,30 +178,23 @@ def backtest_all_trades(df):
                     "出場價": exit_price,
                     "交易天數": days_held,
                     "報酬率%": round(total_ret, 2),
-                    "+10% 達標": format_reach_status(reach_10_days, reach_10_info[1], reach_10_info[0], trade_status),
-                    "+20% 達標": format_reach_status(reach_20_days, reach_20_info[1], reach_20_info[0], trade_status),
-                    "-10% 達標": format_reach_status(reach_m10_days, reach_m10_info[1], reach_m10_info[0], trade_status),
+                    "+10% 達標": format_reach_status(reach_10_days, reach_10_price, reach_10_date, "End", "+10%"),
+                    "+20% 達標": format_reach_status(reach_20_days, reach_20_price, reach_20_date, "End", "+20%"),
+                    "-10% 達標": format_reach_status(reach_m10_days, reach_m10_price, reach_m10_date, "End", "-10%"),
                 })
 
                 equity.append(equity[-1] * (1 + total_ret / 100))
                 in_trade = False
                 observe_count = 0
 
-    if not trades:
-        return None, None
-
-    df_trades = pd.DataFrame(trades)
+    if not trades: return None, None
     
-    # 彙整統計
-    summary = {
+    df_trades = pd.DataFrame(trades)
+    return df_trades, pd.DataFrame([{
         "交易次數": len(df_trades),
-        "勝率%": round((df_trades["報酬率%"] > 0).mean() * 100, 2),
-        "平均報酬%": round(df_trades["報酬率%"].mean(), 2),
-        "最大獲利%": round(df_trades["報酬率%"].max(), 2),
-        "最大虧損%": round(df_trades["報酬率%"].min(), 2),
-    }
-
-    return df_trades, pd.DataFrame([summary])
+        "勝率%": round((df_trades["報酬率%"] > 0).mean()*100, 2),
+        "平均報酬%": round(df_trades["報酬率%"].mean(), 2)
+    }])
 
 
 
