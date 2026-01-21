@@ -52,7 +52,7 @@ STATUS_RANK = {
 }
 
 # ===================================================================
-# 新增：20 日個股擴散率（趨勢穩定度）模組（不影響原系統）
+# 20 日個股擴散率模組（原有）
 # ===================================================================
 def calc_trend_stability(df, window=20):
     if df is None or len(df) < window + 2:
@@ -84,6 +84,22 @@ def interpret_trend_stability(ratio):
         return "🧊 弱勢整理", "觀望為主"
     else:
         return "❄️ 空頭或底部", "型態觀察"
+
+# ===================================================================
+# 🔥 新增：最近 5 日擴散率變化
+# ===================================================================
+def calc_last5_trend_series(df, window=20, days=5):
+    series = []
+    if df is None or len(df) < window + days + 2:
+        return series
+
+    for k in range(days, 0, -1):
+        idx = len(df) - k
+        sub_df = df.iloc[:idx+1]
+        ratio, _, _ = calc_trend_stability(sub_df, window)
+        series.append(ratio)
+
+    return series
 
 # ===================================================================
 # 側邊欄（不改）
@@ -142,7 +158,7 @@ def calc_market_heat(status_count, total):
 st.title("🛡️ SJ 四維量價分析系統")
 
 # ============================================================
-# 單股分析（加入 20 日擴散率）
+# 單股分析（補 Slope_Z + 近5日擴散率）
 # ============================================================
 if run_btn and mode=="單股分析":
     st.subheader("📌 單股即時分析")
@@ -156,27 +172,33 @@ if run_btn and mode=="單股分析":
         curr = df.iloc[-1].to_dict()
         prev = df.iloc[-2].to_dict()
 
-        # 🔥 新增擴散率
+        # 🔥 擴散率
         trend_ratio, long_days, win_days = calc_trend_stability(df, 20)
         trend_text, trend_advice = interpret_trend_stability(trend_ratio)
+
+        # 🔥 近 5 日擴散率
+        last5 = calc_last5_trend_series(df, 20, 5)
+        last5_text = " , ".join([f"{x}%" for x in last5 if x is not None])
 
         st.markdown(
             f"### 🎯 {ticker_input} 當前狀態（截至 {target_date}）\n"
             f"狀態：**{status}**\n"
-            f"操作建議：{op}\n\n"
-            f"🔥 20日趨勢穩定度：**{trend_ratio}%**｜{trend_text}｜{trend_advice}"
+            f"操作建議：{op}\n"
+            f"Slope_Z：**{sz:.2f}**\n\n"
+            f"🔥 20日趨勢穩定度：**{trend_ratio}%**｜{trend_text}｜{trend_advice}\n"
+            f"📈 近5日擴散率變化：[{last5_text}]"
         )
 
         col1,col2,col3,col4,col5,col6 = st.columns(6)
         col1.metric("收盤價", f"{format_price(symbol,curr.get('Close'))}")
         col2.metric("PVO", safe_get_value(curr,'PVO',prev))
         col3.metric("VRI", safe_get_value(curr,'VRI',prev))
-        col4.metric("Slope_Z", safe_get_value(curr,'Slope_Z',{'Slope_Z': get_four_dimension_advice(df,len(df)-2)[2]}))
+        col4.metric("Slope_Z", f"{sz:.2f}")
         col5.metric("Score_Z", f"{scz:.2f}")
         col6.metric("20日擴散率", f"{trend_ratio}%")
 
 # ============================================================
-# 台股 / 美股市場分析（加入每檔擴散率欄位）
+# 台股 / 美股市場分析（🔥 依擴散率由高到低排序）
 # ============================================================
 if run_btn and mode in ["台股市場分析","美股市場分析"]:
 
@@ -196,7 +218,6 @@ if run_btn and mode in ["台股市場分析","美股市場分析"]:
         status, _ = map_status(op, sz)
         curr = df.iloc[-1].to_dict()
 
-        # 🔥 新增擴散率
         trend_ratio, _, _ = calc_trend_stability(df, 20)
         trend_text, _ = interpret_trend_stability(trend_ratio)
 
@@ -208,11 +229,8 @@ if run_btn and mode in ["台股市場分析","美股市場分析"]:
             "VRI": safe_get_value(curr,'VRI',None),
             "Slope_Z": round(sz,2),
             "Score_Z": round(scz,2),
-
-            # 🔥 新增欄位
             "20日擴散率%": trend_ratio,
             "趨勢解讀": trend_text,
-
             "_rank": STATUS_RANK.get(status,99)
         })
 
@@ -223,14 +241,16 @@ if run_btn and mode in ["台股市場分析","美股市場分析"]:
             status_prev, _ = map_status(op_prev, sz_prev)
             prev_status_count[status_prev] = prev_status_count.get(status_prev,0)+1
 
-    # ===== 市場熱度條 =====
     heat = calc_market_heat(status_count, len(results))
     st.subheader(f"📊 市場整體強弱分析 ｜ 多單比例 {heat}%")
     st.progress(heat)
 
-    # ===== 表格 =====
+    # 🔥 改為依「擴散率由高到低」排序
     if results:
-        df_show = pd.DataFrame(results).sort_values(["_rank","20日擴散率%"], ascending=[True,False]).drop(columns=["_rank"])
+        df_show = pd.DataFrame(results)\
+            .sort_values(["20日擴散率%","_rank"], ascending=[False,True])\
+            .drop(columns=["_rank"])
+
         st.dataframe(df_show, use_container_width=True)
 
         # 狀態統計
