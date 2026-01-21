@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
 
 from analysis_engine import get_indicator_data, get_taiwan_symbol, get_advice
 from backtest_5d import get_four_dimension_advice
@@ -52,7 +53,7 @@ STATUS_RANK = {
 }
 
 # ===================================================================
-# 20 日個股擴散率模組（原有）
+# 20 日個股擴散率模組
 # ===================================================================
 def calc_trend_stability(df, window=20):
     if df is None or len(df) < window + 2:
@@ -62,18 +63,14 @@ def calc_trend_stability(df, window=20):
     for i in range(len(df) - window, len(df)):
         op, last, sz, scz = get_four_dimension_advice(df, i)
         status, _ = map_status(op, sz)
-
         if status in ["⭐ 多單進場", "✅ 多單續抱"]:
             count_long += 1
-
     ratio = round(count_long / window * 100, 1)
     return ratio, count_long, window
-
 
 def interpret_trend_stability(ratio):
     if ratio is None:
         return "未提供", "—"
-
     if ratio > 70:
         return "🔥 強勢主升段", "可續抱 / 加碼"
     elif ratio >= 50:
@@ -85,20 +82,15 @@ def interpret_trend_stability(ratio):
     else:
         return "❄️ 空頭或底部", "型態觀察"
 
-# ===================================================================
-# 🔥 新增：最近 5 日擴散率變化
-# ===================================================================
 def calc_last5_trend_series(df, window=20, days=5):
     series = []
     if df is None or len(df) < window + days + 2:
         return series
-
     for k in range(days, 0, -1):
         idx = len(df) - k
         sub_df = df.iloc[:idx+1]
         ratio, _, _ = calc_trend_stability(sub_df, window)
         series.append(ratio)
-
     return series
 
 # ===================================================================
@@ -158,13 +150,13 @@ def calc_market_heat(status_count, total):
 st.title("🛡️ SJ 四維量價分析系統")
 
 # ============================================================
-# 單股分析（補 Slope_Z + 近5日擴散率）
+# 單股分析（補 Slope_Z + 近5日擴散率 + 圖表）
 # ============================================================
 if run_btn and mode=="單股分析":
     st.subheader("📌 單股即時分析")
     symbol = get_taiwan_symbol(ticker_input)
     df = get_indicator_data(symbol, start_1y, end_dt)
-    if df is None or len(df)<150:
+    if df is None or len(df)<50:
         st.warning("資料不足")
     else:
         op, last, sz, scz = get_four_dimension_advice(df,len(df)-1)
@@ -175,8 +167,6 @@ if run_btn and mode=="單股分析":
         # 🔥 擴散率
         trend_ratio, long_days, win_days = calc_trend_stability(df, 20)
         trend_text, trend_advice = interpret_trend_stability(trend_ratio)
-
-        # 🔥 近 5 日擴散率
         last5 = calc_last5_trend_series(df, 20, 5)
         last5_text = " , ".join([f"{x}%" for x in last5 if x is not None])
 
@@ -197,75 +187,31 @@ if run_btn and mode=="單股分析":
         col5.metric("Score_Z", f"{scz:.2f}")
         col6.metric("20日擴散率", f"{trend_ratio}%")
 
-# ============================================================
-# 台股 / 美股市場分析（🔥 依擴散率由高到低排序）
-# ============================================================
-if run_btn and mode in ["台股市場分析","美股市場分析"]:
+        # ============================================================
+        # 🔥 圖表：PVO/VRI vs 20日擴散率 + 最近5日標註
+        # ============================================================
+        pvo_series = df["PVO"] if "PVO" in df.columns else pd.Series(np.nan, index=df.index)
+        vri_series = df["VRI"] if "VRI" in df.columns else pd.Series(np.nan, index=df.index)
 
-    watch = TAIWAN_LIST if mode=="台股市場分析" else US_LIST
+        trend_series = pd.Series([calc_trend_stability(df.iloc[:i+1],20)[0] for i in range(len(df))], index=df.index)
 
-    results = []
-    status_count = {}
-    prev_status_count = {}
+        fig, ax1 = plt.subplots(figsize=(12,5))
+        ax1.plot(df.index, pvo_series, color='blue', label='PVO', linewidth=1.5)
+        ax1.plot(df.index, vri_series, color='green', label='VRI', linewidth=1.5)
+        ax1.set_ylabel("PVO / VRI", color='black')
+        ax1.tick_params(axis='y', labelcolor='black')
+        ax1.set_title(f"{ticker_input} | PVO / VRI 與 20日擴散率同步圖")
 
-    for sym in watch:
-        symbol = get_taiwan_symbol(sym)
-        df = get_indicator_data(symbol, start_1y, end_dt)
-        if df is None or len(df)<150:
-            continue
+        ax2 = ax1.twinx()
+        ax2.plot(df.index, trend_series, color='red', label='20日擴散率', linewidth=2, linestyle='--', marker='o')
+        ax2.set_ylabel("20日擴散率 (%)", color='red')
+        ax2.tick_params(axis='y', labelcolor='red')
 
-        op, last, sz, scz = get_four_dimension_advice(df,len(df)-1)
-        status, _ = map_status(op, sz)
-        curr = df.iloc[-1].to_dict()
+        # 標註最近5日
+        for i, val in enumerate(last5):
+            ax2.text(df.index[-5+i], val+1, f"{val}%", color='red', fontsize=10, ha='center')
 
-        trend_ratio, _, _ = calc_trend_stability(df, 20)
-        trend_text, _ = interpret_trend_stability(trend_ratio)
+        ax1.legend(loc='upper left')
+        ax2.legend(loc='upper right')
 
-        results.append({
-            "代號": sym,
-            "收盤": format_price(symbol,curr.get("Close",np.nan)),
-            "狀態": status,
-            "PVO": safe_get_value(curr,'PVO',None),
-            "VRI": safe_get_value(curr,'VRI',None),
-            "Slope_Z": round(sz,2),
-            "Score_Z": round(scz,2),
-            "20日擴散率%": trend_ratio,
-            "趨勢解讀": trend_text,
-            "_rank": STATUS_RANK.get(status,99)
-        })
-
-        status_count[status] = status_count.get(status,0)+1
-
-        if len(df)>1:
-            op_prev, _, sz_prev, _ = get_four_dimension_advice(df,len(df)-2)
-            status_prev, _ = map_status(op_prev, sz_prev)
-            prev_status_count[status_prev] = prev_status_count.get(status_prev,0)+1
-
-    heat = calc_market_heat(status_count, len(results))
-    st.subheader(f"📊 市場整體強弱分析 ｜ 多單比例 {heat}%")
-    st.progress(heat)
-
-    # 🔥 改為依「擴散率由高到低」排序
-    if results:
-        df_show = pd.DataFrame(results)\
-            .sort_values(["20日擴散率%","_rank"], ascending=[False,True])\
-            .drop(columns=["_rank"])
-
-        st.dataframe(df_show, use_container_width=True)
-
-        # 狀態統計
-        count_rows = []
-        for k,v in status_count.items():
-            diff = v - prev_status_count.get(k,0)
-            arrow = " ↑" if diff > 0 else " ↓" if diff < 0 else ""
-            count_rows.append({
-                "狀態": k,
-                "數量": v,
-                "昨日比較": f"{diff}{arrow}"
-            })
-
-        st.subheader("📈 狀態統計")
-        st.dataframe(pd.DataFrame(count_rows), use_container_width=True)
-
-    else:
-        st.warning("市場清單沒有可用資料")
+        st.pyplot(fig)
