@@ -1,6 +1,17 @@
-import streamlit as st
-import pandas as pd
+import sys
 import numpy as np
+import pandas as pd
+import streamlit as st
+import altair as alt
+
+with st.sidebar:
+    st.markdown("## 🧪 系統環境狀態")
+    st.write("Python:", sys.version.split()[0])
+    st.write("numpy:", np.__version__)
+    st.write("pandas:", pd.__version__)
+    st.write("streamlit:", st.__version__)
+    st.write("altair:", alt.__version__)
+
 from datetime import datetime, timedelta
 
 from analysis_engine import get_indicator_data, get_taiwan_symbol, get_advice
