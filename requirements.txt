@@ -1,8 +1,33 @@
-streamlit==1.32.2
-pandas>=2.0
-numpy>=1.26
-yfinance
-scikit-learn
-scipy
-altair==4.2.2
+# ===============================
+# SJ 四維系統｜穩定套件版本組合
+# Python 3.11 專用
+# ===============================
 
+
+# 基礎時間與時區
+python-dateutil
+pytz
+
+
+# 數值與資料核心（穩定黃金組合）
+numpy==1.26.4
+pandas==2.2.2
+scipy
+scikit-learn
+
+
+# 技術指標（與 numpy 1.26 完全相容）
+pandas-ta==0.3.14b0
+
+
+# 繪圖
+matplotlib
+
+
+# 金融資料
+yfinance
+
+
+# Streamlit 穩定組合（解 altair / vegalite 問題）
+streamlit==1.32.2
+altair==4.2.2
