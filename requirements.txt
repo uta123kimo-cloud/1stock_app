@@ -9,7 +9,8 @@ scipy
 scikit-learn
 
 # 技術指標
-pandas-ta==0.3.14b0
+git+https://github.com/twopirllc/pandas-ta.git@0.3.14b0
+
 
 # 繪圖
 matplotlib
@@ -29,4 +30,5 @@ yfinance
 # Streamlit 穩定組合（解 altair / vegalite 問題）
 streamlit==1.32.2
 altair==4.2.2
+
 
