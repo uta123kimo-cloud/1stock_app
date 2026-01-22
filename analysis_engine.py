@@ -1,14 +1,15 @@
-# ====== analysis_engine.py ======
-
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
 import numpy as np
 from datetime import datetime, timedelta
 import warnings
 import logging
 
-from config import WATCH_LIST   # ✅ 股票代號只從 config 來
+# 從專案 config 導入
+try:
+    from config import WATCH_LIST
+except ImportError:
+    WATCH_LIST = ["2330", "2454", "AAPL", "NVDA"]  # 備援名單
 
 # --------------------
 # 基本設定
@@ -16,23 +17,25 @@ from config import WATCH_LIST   # ✅ 股票代號只從 config 來
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 warnings.filterwarnings("ignore")
 
-
 # --------------------
 # 工具函式
 # --------------------
 def get_slope_poly(series, window=5):
+    """
+    計算線性斜率百分比，反映價格變動速率
+    """
     if len(series) < window:
         return 0.0
     y = series.values[-window:]
     x = np.arange(window)
+    # 線性回歸
     slope, _ = np.polyfit(x, y, 1)
     base = y[0] if y[0] != 0 else 1
     return (slope / base) * 100
 
-
 def get_taiwan_symbol(symbol: str) -> str:
     """
-    自動判斷 .TW / .TWO
+    自動判斷台股 .TW / .TWO 邏輯
     """
     s = str(symbol).strip()
     if not s.isdigit():
@@ -41,16 +44,15 @@ def get_taiwan_symbol(symbol: str) -> str:
     for suffix in [".TW", ".TWO"]:
         try:
             t = yf.Ticker(f"{s}{suffix}")
+            # 輕量化檢查，只抓 1 天資料
             if not t.history(period="1d").empty:
                 return f"{s}{suffix}"
         except Exception:
             pass
-
     return f"{s}.TW"
 
-
 # --------------------
-# 指標計算
+# 指標計算 (手動實現，取代 pandas-ta)
 # --------------------
 def get_indicator_data(symbol, start_dt, end_dt):
     try:
@@ -65,25 +67,33 @@ def get_indicator_data(symbol, start_dt, end_dt):
         if df.empty:
             return None
 
+        # 處理 MultiIndex 欄位 (yfinance 新版特性)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
-        # === 技術指標 ===
-        df["PVO"] = (
-            (ta.ema(df["Volume"], 12) - ta.ema(df["Volume"], 26))
-            / (ta.ema(df["Volume"], 26) + 1e-6)
-        ) * 100
+        # === 原生技術指標計算 (取代 pandas_ta) ===
+        
+        # 1. PVO (Percentage Volume Oscillator)
+        # 邏輯：成交量的 MACD。EMA(12) vs EMA(26)
+        ema12_vol = df["Volume"].ewm(span=12, adjust=False).mean()
+        ema26_vol = df["Volume"].ewm(span=26, adjust=False).mean()
+        df["PVO"] = ((ema12_vol - ema26_vol) / (ema26_vol + 1e-6)) * 100
 
+        # 2. VRI (Volume Relative Index) 
+        # 原代碼邏輯：上漲日的成交量佔比 (14日 SMA)
+        vol_up = df["Volume"].where(df["Close"].diff() > 0, 0)
         df["VRI"] = (
-            ta.sma(df["Volume"].where(df["Close"].diff() > 0, 0), 14)
-            / (ta.sma(df["Volume"], 14) + 1e-6)
+            vol_up.rolling(window=14).mean() 
+            / (df["Volume"].rolling(window=14).mean() + 1e-6)
         ) * 100
 
+        # 3. Slope (5日斜率)
         df["Slope"] = df["Close"].rolling(5).apply(
             lambda x: get_slope_poly(x, 5),
             raw=False
         )
 
+        # 4. Score (四維評分加權)
         df["Score"] = (
             df["Slope"] * 0.6 +
             df["PVO"] * 0.2 +
@@ -92,29 +102,27 @@ def get_indicator_data(symbol, start_dt, end_dt):
 
         return df.dropna()
 
-    except Exception:
+    except Exception as e:
+        print(f"Error calculating indicators for {symbol}: {e}")
         return None
 
-
 # --------------------
-# 訊號判斷
+# 訊號判斷 (Z-Score 化)
 # --------------------
 def get_advice(df: pd.DataFrame, idx: int):
-    win = 60
-
+    win = 60 # 60日回測窗口
+    
+    # 擷取歷史區間進行標準化
     slope_hist = df["Slope"].iloc[max(0, idx - win): idx + 1]
     score_hist = df["Score"].iloc[max(0, idx - win): idx + 1]
 
-    z_slope = (
-        (df.iloc[idx]["Slope"] - slope_hist.mean())
-        / (slope_hist.std() + 1e-6)
-    )
+    # 計算 Slope_Z (斜率位置)
+    z_slope = (df.iloc[idx]["Slope"] - slope_hist.mean()) / (slope_hist.std() + 1e-6)
+    
+    # 計算 Score_Z (綜合評分位置)
+    z_score = (df.iloc[idx]["Score"] - score_hist.mean()) / (score_hist.std() + 1e-6)
 
-    z_score = (
-        (df.iloc[idx]["Score"] - score_hist.mean())
-        / (score_hist.std() + 1e-6)
-    )
-
+    # 狀態判定標籤
     if z_slope > 1.5:
         tag = "強勢"
     elif z_slope < -1.0:
@@ -122,15 +130,20 @@ def get_advice(df: pd.DataFrame, idx: int):
     else:
         tag = "觀望"
 
-    return tag, round(z_slope, 2), round(z_score, 2)
-
+    return tag, round(float(z_slope), 2), round(float(z_score), 2)
 
 # --------------------
-# 主分析引擎（回傳資料）
+# 主分析引擎
 # --------------------
 def run_analysis(target_date: str, lookback_days: int, limit_count: int):
-    end_dt = datetime.strptime(target_date, "%Y-%m-%d") + timedelta(days=1)
-    start_dt = end_dt - timedelta(days=lookback_days)
+    # 日期處理
+    if isinstance(target_date, str):
+        target_dt_obj = datetime.strptime(target_date, "%Y-%m-%d")
+    else:
+        target_dt_obj = target_date
+
+    end_dt = target_dt_obj + timedelta(days=1)
+    start_dt = end_dt - timedelta(days=lookback_days + 100) # 多抓一點資料以計算指標
 
     tickers = WATCH_LIST[:limit_count]
     results = []
@@ -139,7 +152,7 @@ def run_analysis(target_date: str, lookback_days: int, limit_count: int):
         symbol = get_taiwan_symbol(t)
         df = get_indicator_data(symbol, start_dt, end_dt)
 
-        if df is None or len(df) < 10:
+        if df is None or len(df) < 20:
             continue
 
         idx = len(df) - 1
@@ -159,25 +172,15 @@ def run_analysis(target_date: str, lookback_days: int, limit_count: int):
 
     return pd.DataFrame(results)
 
-
-# --------------------
-# 給 app.py 用的入口
-# --------------------
 def main():
-    """
-    提供給 app.py import 使用
-    """
     today = datetime.now().strftime("%Y-%m-%d")
     return run_analysis(
         target_date=today,
-        lookback_days=60,
+        lookback_days=150,
         limit_count=len(WATCH_LIST)
     )
 
-
-# --------------------
-# CLI / Debug 用
-# --------------------
 if __name__ == "__main__":
-    df = main()
-    print(df.head())
+    res_df = main()
+    if not res_df.empty:
+        print(res_df.drop(columns=['_df']).head())
