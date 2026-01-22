@@ -1,8 +1,3 @@
-Your Streamlit app code looks well-structured, but here are some suggestions and corrections to enhance it while keeping the original architecture and variable names intact. The following adjustments will help you avoid common pitfalls and improve clarity and functionality.
-
-### Updated Streamlit Code
-
-```python
 import streamlit as st
 import pandas as pd
 import numpy as np
