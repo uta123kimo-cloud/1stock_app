@@ -21,7 +21,7 @@
     }
   },
 
-  "updateContentCommand": "[ -f packages.txt ] && sudo apt update && sudo xargs apt install -y < packages.txt || true; pip install --upgrade pip; [ -f requirements.txt ] && pip install -r requirements.txt; echo '✅ SJ Quant Stable Environment Ready'",
+  "updateContentCommand": "[ -f packages.txt ] && sudo apt update && sudo xargs apt install -y < packages.txt || true; python -m pip install --upgrade pip; [ -f requirements.txt ] && python -m pip install -r requirements.txt --no-cache-dir; echo '✅ SJ Quant Stable Environment Ready'",
 
   "postAttachCommand": {
     "server": "streamlit run app.py --server.enableCORS false --server.enableXsrfProtection false"
