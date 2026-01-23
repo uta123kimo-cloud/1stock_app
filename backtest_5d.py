@@ -1,5 +1,5 @@
 # =====================================================
-# SJ 四維量價分析引擎 - 修正版
+# SJ 四維量價分析引擎 - 修正版（刪除動態安裝 pip）
 # =====================================================
 
 # --------------------
@@ -14,22 +14,10 @@ import pandas as pd
 from datetime import datetime, date, timedelta
 
 # --------------------
-# yfinance 導入與自動安裝
+# yfinance 與 pandas_ta 導入（假設已安裝）
 # --------------------
-try:
-    import yfinance as yf
-except ImportError:
-    import subprocess
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "yfinance"])
-    import yfinance as yf
-
-# pandas_ta 如果有需求也可類似安裝：
-try:
-    import pandas_ta as ta
-except ImportError:
-    import subprocess
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "pandas_ta"])
-    import pandas_ta as ta
+import yfinance as yf
+import pandas_ta as ta
 
 # --------------------
 # 屏蔽警告
@@ -40,7 +28,9 @@ warnings.filterwarnings('ignore')
 # --------------------
 # 核心參數
 # --------------------
-WATCH_LIST = ["4576", "3706", "3005", "2313","5347","6239","8046","6438","2337","2408","ASPI","3037","1560","2408","3264","2337","3711","1802","2404","3237","2375","6173"]
+WATCH_LIST = ["4576", "3706", "3005", "2313","5347","6239","8046","6438","2337","2408",
+              "ASPI","3037","1560","2408","3264","2337","3711","1802","2404","3237",
+              "2375","6173"]
 BENCHMARK_TICKER = "0050.TW"
 TARGET_DATE = "2026-01-12"
 LOOKBACK_DAYS = 360
@@ -134,13 +124,16 @@ def get_indicator_data(symbol, start_dt, end_dt):
         if df is None or df.empty: return None
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
         df.columns = [str(c).strip() for c in df.columns]
+        # 使用 pandas_ta 計算 PVO / VRI
         ev12, ev26 = ta.ema(df['Volume'],12), ta.ema(df['Volume'],26)
         df['PVO'] = ((ev12-ev26)/(ev26+1e-6))*100
         df['VRI'] = (ta.sma(df['Volume'].where(df['Close'].diff()>0,0),14)/(ta.sma(df['Volume'],14)+1e-6))*100
         df['Slope'] = df['Close'].rolling(5).apply(lambda x: get_slope_poly(x,5))
         df['Score'] = df['PVO']*0.2 + df['VRI']*0.2 + df['Slope']*0.6
         return df.dropna()
-    except: return None
+    except Exception as e:
+        print(f"Error fetching data for {symbol}: {e}")
+        return None
 
 # --------------------
 # 主程式
