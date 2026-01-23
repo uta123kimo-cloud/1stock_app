@@ -1,38 +1,60 @@
+# =====================================================
+# SJ 四維量價分析引擎 - 修正版
+# =====================================================
 
-import yfinance as yf
-import pandas as pd
-import pandas_ta as ta
-import numpy as np
-# --- 放在程式最上方 ---
-from datetime import datetime, date
-
-# 定義 target_date
-target_date = date.today()  # 或 datetime.now().date()
-
-# base_dt 轉換成 datetime
-base_dt = datetime.combine(target_date, datetime.min.time()) if isinstance(target_date, date) else target_date
-
-print(base_dt)
-
+# --------------------
+# 套件導入
+# --------------------
+import sys
 import unicodedata
 import warnings
 import logging
+import numpy as np
+import pandas as pd
+from datetime import datetime, date, timedelta
 
-# 屏蔽 yfinance 錯誤訊息，防止干擾顯示格式
+# --------------------
+# yfinance 導入與自動安裝
+# --------------------
+try:
+    import yfinance as yf
+except ImportError:
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "yfinance"])
+    import yfinance as yf
+
+# pandas_ta 如果有需求也可類似安裝：
+try:
+    import pandas_ta as ta
+except ImportError:
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pandas_ta"])
+    import pandas_ta as ta
+
+# --------------------
+# 屏蔽警告
+# --------------------
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 warnings.filterwarnings('ignore')
 
-# ===================================================================
-# 1. 核心參數
-# ===================================================================
+# --------------------
+# 核心參數
+# --------------------
 WATCH_LIST = ["4576", "3706", "3005", "2313","5347","6239","8046","6438","2337","2408","ASPI","3037","1560","2408","3264","2337","3711","1802","2404","3237","2375","6173"]
 BENCHMARK_TICKER = "0050.TW"
 TARGET_DATE = "2026-01-12"
 LOOKBACK_DAYS = 360
 
-# ===================================================================
-# 2. 輔助工具
-# ===================================================================
+# --------------------
+# 時間初始化
+# --------------------
+target_date = datetime.strptime(TARGET_DATE, "%Y-%m-%d").date() if isinstance(TARGET_DATE, str) else TARGET_DATE
+base_dt = datetime.combine(target_date, datetime.min.time()) if isinstance(target_date, date) else target_date
+print(f"分析基準日 base_dt: {base_dt}")
+
+# --------------------
+# 輔助工具函式
+# --------------------
 def align_text(text, width):
     text = str(text)
     cur_len = sum(2 if unicodedata.east_asian_width(c) in ('W','F','A') else 1 for c in text)
@@ -53,13 +75,12 @@ def get_taiwan_symbol(symbol):
             t = yf.Ticker(target)
             if not t.history(period="1d").empty:
                 return target
-        except:
-            continue
+        except: continue
     return f"{s}.TW"
 
-# ===================================================================
-# 3. 核心決策引擎
-# ===================================================================
+# --------------------
+# 核心決策引擎
+# --------------------
 def get_four_dimension_advice(df, c_idx):
     window = 60
     hist_slopes = df['Slope'].iloc[max(0,c_idx-window):c_idx+1]
@@ -67,7 +88,7 @@ def get_four_dimension_advice(df, c_idx):
     sz = (df.iloc[c_idx]['Slope'] - hist_slopes.mean()) / (hist_slopes.std() + 1e-6)
     scz = (df.iloc[c_idx]['Score'] - hist_scores.mean()) / (hist_scores.std() + 1e-6)
     v = df.iloc[c_idx]['VRI']
-    pd = df.iloc[c_idx]['PVO'] - df.iloc[c_idx-1]['PVO']
+    pd_val = df.iloc[c_idx]['PVO'] - df.iloc[c_idx-1]['PVO']
     try:
         is_u = df.iloc[c_idx]['Slope'] > df.iloc[c_idx-1]['Slope'] > df.iloc[c_idx-2]['Slope']
     except: is_u = False
@@ -101,12 +122,12 @@ def get_four_dimension_advice(df, c_idx):
         if is_up: return "準備翻多"
         return "觀望整理"
 
-    curr_op = detailed_gate(sz,v,pd,is_u)
+    curr_op = detailed_gate(sz,v,pd_val,is_u)
     return curr_op, last_action_display, sz, scz
 
-# ===================================================================
-# 4. 取得指標資料
-# ===================================================================
+# --------------------
+# 取得指標資料
+# --------------------
 def get_indicator_data(symbol, start_dt, end_dt):
     try:
         df = yf.download(symbol, start=start_dt, end=end_dt, progress=False, auto_adjust=True)
@@ -121,9 +142,9 @@ def get_indicator_data(symbol, start_dt, end_dt):
         return df.dropna()
     except: return None
 
-# ===================================================================
-# 5. 主程式
-# ===================================================================
+# --------------------
+# 主程式
+# --------------------
 def main():
     print(f"系統訊息：邏輯對齊分析啟動... [目標日: {TARGET_DATE}]\n")
     end_dt = datetime.strptime(TARGET_DATE,"%Y-%m-%d")+timedelta(days=1)
