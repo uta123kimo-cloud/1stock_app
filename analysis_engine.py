@@ -1,5 +1,5 @@
 # =====================================================
-# SJ 分析引擎 - 修正版
+# SJ 分析引擎 - 修正版（刪除動態安裝 pip，保留原有架構）
 # =====================================================
 
 # --------------------
@@ -13,14 +13,9 @@ import pandas as pd
 from datetime import datetime, date, timedelta
 
 # --------------------
-# yfinance 導入 (解決 ModuleNotFoundError)
+# yfinance 導入 (移除 subprocess 安裝)
 # --------------------
-try:
-    import yfinance as yf
-except ImportError:
-    import subprocess, sys
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "yfinance"])
-    import yfinance as yf
+import yfinance as yf
 
 # --------------------
 # 從專案 config 導入
@@ -39,11 +34,8 @@ warnings.filterwarnings("ignore")
 # --------------------
 # 時間初始化（解決 base_dt / target_date 問題）
 # --------------------
-# 預設 target_date
-target_date = date.today()  # 或 datetime.now().date()
-# base_dt 轉 datetime
+target_date = date.today()
 base_dt = datetime.combine(target_date, datetime.min.time()) if isinstance(target_date, date) else target_date
-
 print(f"分析基準日 base_dt: {base_dt}")
 
 # --------------------
@@ -112,7 +104,6 @@ def get_advice(df: pd.DataFrame, idx: int):
 # 主分析函式
 # --------------------
 def run_analysis(target_date: date, lookback_days: int, limit_count: int):
-    # 轉 datetime
     if isinstance(target_date, str):
         target_dt_obj = datetime.strptime(target_date, "%Y-%m-%d")
     else:
