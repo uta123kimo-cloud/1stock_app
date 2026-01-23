@@ -19,7 +19,8 @@ altair==5.0.1
 
 
 # 金融資料
-yfinance==0.2.27
+yfinance
+
 
 
 
