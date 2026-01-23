@@ -1,7 +1,17 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+# --- 放在程式最上方 ---
+from datetime import datetime, date
+
+# 定義 target_date
+target_date = date.today()  # 或 datetime.now().date()
+
+# base_dt 轉換成 datetime
+base_dt = datetime.combine(target_date, datetime.min.time()) if isinstance(target_date, date) else target_date
+
+print(base_dt)
+
 import warnings
 import logging
 
