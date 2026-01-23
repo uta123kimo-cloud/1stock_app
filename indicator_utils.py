@@ -1,27 +1,37 @@
 
-# ====== analysis_engine.py ======
-
-import yfinance as yf
-import pandas as pd
-import pandas_ta as ta
-import numpy as np
-# --- 放在程式最上方 ---
-from datetime import datetime, date
-
-# 定義 target_date
-target_date = date.today()  # 或 datetime.now().date()
-
-# base_dt 轉換成 datetime
-base_dt = datetime.combine(target_date, datetime.min.time()) if isinstance(target_date, date) else target_date
-
-print(base_dt)
-
+import sys
 import warnings
 import logging
+import numpy as np
+import pandas as pd
+from datetime import datetime, date, timedelta
 
+# --------------------
+# 自動導入與安裝 yfinance / pandas_ta
+# --------------------
+try:
+    import yfinance as yf
+except ImportError:
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "yfinance"])
+    import yfinance as yf
+
+try:
+    import pandas_ta as ta
+except ImportError:
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pandas_ta"])
+    import pandas_ta as ta
+
+# --------------------
+# 屏蔽警告
+# --------------------
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 warnings.filterwarnings('ignore')
 
+# --------------------
+# 核心參數
+# --------------------
 WATCH_LIST = [
     "3030", "3706", "8096", "2313", "4958",
     "2330", "2317", "2454", "2308", "2382", "2303", "3711", "2412", "2357", "3231",
@@ -40,6 +50,17 @@ WATCH_LIST = [
 
 BENCHMARK_TICKER = "0050.TW"
 
+# --------------------
+# 安全初始化 target_date / base_dt
+# --------------------
+TARGET_DATE = "2026-01-12"
+target_date = datetime.strptime(TARGET_DATE, "%Y-%m-%d").date() if isinstance(TARGET_DATE, str) else TARGET_DATE
+base_dt = datetime.combine(target_date, datetime.min.time()) if isinstance(target_date, date) else target_date
+print(f"分析基準日 base_dt: {base_dt}")
+
+# --------------------
+# 核心函式
+# --------------------
 def get_slope_poly(series, window=5):
     if len(series) < window:
         return 0
@@ -72,8 +93,7 @@ def get_indicator_data(symbol, start_dt, end_dt):
                      / (ta.ema(df['Volume'], 26) + 1e-6)) * 100
         df['VRI'] = (ta.sma(df['Volume'].where(df['Close'].diff() > 0, 0), 14)
                      / (ta.sma(df['Volume'], 14) + 1e-6)) * 100
-        df['Slope'] = df['Close'].rolling(5).apply(
-            lambda x: get_slope_poly(x, 5))
+        df['Slope'] = df['Close'].rolling(5).apply(lambda x: get_slope_poly(x, 5))
         df['Score'] = df['Slope'] * 0.6 + df['PVO'] * 0.2 + df['VRI'] * 0.2
 
         return df.dropna()
@@ -128,3 +148,11 @@ def run_analysis(target_date, lookback_days, limit_count):
         })
 
     return pd.DataFrame(results)
+
+# --------------------
+# 主程式
+# --------------------
+if __name__ == "__main__":
+    res = run_analysis(TARGET_DATE, lookback_days=360, limit_count=len(WATCH_LIST))
+    if not res.empty:
+        print(res.drop(columns=['_df']).head())
