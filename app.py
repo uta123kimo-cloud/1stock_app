@@ -12,7 +12,13 @@ with st.sidebar:
     st.write("streamlit:", st.__version__)
     st.write("altair:", alt.__version__)
 
-from datetime import datetime, timedelta
+from datetime import datetime, date
+# 定義 target_date
+target_date = date.today()  # 或 datetime.now().date()
+# base_dt 轉換成 datetime
+base_dt = datetime.combine(target_date, datetime.min.time()) if isinstance(target_date, date) else target_date
+
+print(base_dt)
 
 from analysis_engine import get_indicator_data, get_taiwan_symbol, get_advice
 from backtest_5d import get_four_dimension_advice
