@@ -3,23 +3,19 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import altair as alt
+from datetime import datetime, date, timedelta  # ✅ 加入 timedelta
 
-with st.sidebar:
-    st.markdown("## 🧪 系統環境狀態")
-    st.write("Python:", sys.version.split()[0])
-    st.write("numpy:", np.__version__)
-    st.write("pandas:", pd.__version__)
-    st.write("streamlit:", st.__version__)
-    st.write("altair:", alt.__version__)
 
-from datetime import datetime, date
-# 定義 target_date
-target_date = date.today()  # 或 datetime.now().date()
-# base_dt 轉換成 datetime
+# ===================================================================
+# 基本時間設定（修正 target_date / base_dt）
+# ===================================================================
+# 預設 target_date
+target_date = date.today()  # 初始值
 base_dt = datetime.combine(target_date, datetime.min.time()) if isinstance(target_date, date) else target_date
 
-print(base_dt)
-
+# ===================================================================
+# 導入自訂模組
+# ===================================================================
 from analysis_engine import get_indicator_data, get_taiwan_symbol, get_advice
 from backtest_5d import get_four_dimension_advice
 from config import WATCH_LIST as TAIWAN_LIST
@@ -40,7 +36,7 @@ table td {font-size:14px !important;}
 """, unsafe_allow_html=True)
 
 # ===================================================================
-# 狀態分類（完全不改）
+# 狀態分類函式
 # ===================================================================
 def map_status(op_text, slope_z):
     if "做空" in op_text or "空單" in op_text:
@@ -69,7 +65,7 @@ STATUS_RANK = {
 }
 
 # ===================================================================
-# 20 日個股擴散率模組（原有）
+# 20日個股擴散率模組
 # ===================================================================
 def calc_trend_stability(df, window=20):
     if df is None or len(df) < window + 2:
@@ -103,7 +99,7 @@ def interpret_trend_stability(ratio):
         return "❄️ 空頭或底部", "型態觀察"
 
 # ===================================================================
-# 🔥 新增：最近 5 日擴散率變化
+# 最近5日擴散率變化
 # ===================================================================
 def calc_last5_trend_series(df, window=20, days=5):
     series = []
@@ -119,29 +115,31 @@ def calc_last5_trend_series(df, window=20, days=5):
     return series
 
 # ===================================================================
-# 側邊欄（不改）
+# 側邊欄選項
 # ===================================================================
 with st.sidebar:
     st.title("🎯 分析模式")
     mode = st.radio("選擇分析類型", ["單股分析", "台股市場分析", "美股市場分析"])
     st.divider()
-    target_date = st.date_input("分析基準日", datetime.now())
+    # 🔥 使用者可選分析基準日
+    target_date = st.date_input("分析基準日", date.today())
     st.divider()
     ticker_input = st.text_input("單股代號", "2330")
     run_btn = st.button("開始分析")
 
 # ===================================================================
-# 時間設定（不改）
+# 時間設定
 # ===================================================================
 LOOKBACK_1Y = 365
-if isinstance(target_date, datetime):
-    end_dt = target_date + timedelta(days=1)
+if isinstance(target_date, date):
+    base_dt = datetime.combine(target_date, datetime.min.time())
 else:
-    end_dt = datetime.strptime(str(target_date), "%Y-%m-%d") + timedelta(days=1)
+    base_dt = target_date
+end_dt = base_dt + timedelta(days=1)
 start_1y = end_dt - timedelta(days=LOOKBACK_1Y)
 
 # ===================================================================
-# 工具函式（不改）
+# 工具函式
 # ===================================================================
 def safe_get_value(curr, key, prev=None):
     val = curr.get(key, None)
@@ -175,7 +173,7 @@ def calc_market_heat(status_count, total):
 st.title("🛡️ SJ 四維量價分析系統")
 
 # ============================================================
-# 單股分析（補 Slope_Z + 近5日擴散率）
+# 單股分析
 # ============================================================
 if run_btn and mode=="單股分析":
     st.subheader("📌 單股即時分析")
@@ -189,11 +187,11 @@ if run_btn and mode=="單股分析":
         curr = df.iloc[-1].to_dict()
         prev = df.iloc[-2].to_dict()
 
-        # 🔥 擴散率
+        # 20日擴散率
         trend_ratio, long_days, win_days = calc_trend_stability(df, 20)
         trend_text, trend_advice = interpret_trend_stability(trend_ratio)
 
-        # 🔥 近 5 日擴散率
+        # 近5日擴散率
         last5 = calc_last5_trend_series(df, 20, 5)
         last5_text = " , ".join([f"{x}%" for x in last5 if x is not None])
 
@@ -215,10 +213,9 @@ if run_btn and mode=="單股分析":
         col6.metric("20日擴散率", f"{trend_ratio}%")
 
 # ============================================================
-# 台股 / 美股市場分析（🔥 依擴散率由高到低排序）
+# 市場分析
 # ============================================================
 if run_btn and mode in ["台股市場分析","美股市場分析"]:
-
     watch = TAIWAN_LIST if mode=="台股市場分析" else US_LIST
 
     results = []
@@ -262,7 +259,6 @@ if run_btn and mode in ["台股市場分析","美股市場分析"]:
     st.subheader(f"📊 市場整體強弱分析 ｜ 多單比例 {heat}%")
     st.progress(heat)
 
-    # 🔥 改為依「擴散率由高到低」排序
     if results:
         df_show = pd.DataFrame(results)\
             .sort_values(["20日擴散率%","_rank"], ascending=[False,True])\
@@ -270,7 +266,6 @@ if run_btn and mode in ["台股市場分析","美股市場分析"]:
 
         st.dataframe(df_show, use_container_width=True)
 
-        # 狀態統計
         count_rows = []
         for k,v in status_count.items():
             diff = v - prev_status_count.get(k,0)
