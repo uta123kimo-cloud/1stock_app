@@ -7,7 +7,6 @@ numpy==1.25.0
 pandas==2.1.1
 scipy
 scikit-learn
-pandas_ta==0.3.21b0
 
 
 # 繪圖
@@ -23,6 +22,7 @@ altair==5.0.1
 
 # 金融資料
 yfinance==0.2.27
+
 
 
 
