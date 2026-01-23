@@ -1,3 +1,4 @@
+# ====== 1stock_app.py ======
 import sys
 import numpy as np
 import pandas as pd
@@ -5,13 +6,14 @@ import streamlit as st
 import altair as alt
 from datetime import datetime, date, timedelta  # ✅ 加入 timedelta
 
-
 # ===================================================================
-# 基本時間設定（修正 target_date / base_dt）
+# 基本時間設定
 # ===================================================================
-# 預設 target_date
-target_date = date.today()  # 初始值
+LOOKBACK_1Y = 365
+target_date = date.today()
 base_dt = datetime.combine(target_date, datetime.min.time()) if isinstance(target_date, date) else target_date
+end_dt = base_dt + timedelta(days=1)
+start_1y = end_dt - timedelta(days=LOOKBACK_1Y)
 
 # ===================================================================
 # 導入自訂模組
@@ -22,7 +24,7 @@ from config import WATCH_LIST as TAIWAN_LIST
 from configA import WATCH_LIST as US_LIST
 
 # ===================================================================
-# UI 設定
+# Streamlit UI 設定
 # ===================================================================
 st.set_page_config(page_title="SJ 四維量價戰情室", layout="wide")
 st.markdown("""
@@ -52,8 +54,7 @@ def map_status(op_text, slope_z):
         return "⚠️ 空手觀望", 4
     if slope_z > 0:
         return "⚠️ 多頭觀望", 4
-    else:
-        return "⚠️ 空頭觀望", 4
+    return "⚠️ 空頭觀望", 4
 
 STATUS_RANK = {
     "⭐ 多單進場": 1,
@@ -70,23 +71,18 @@ STATUS_RANK = {
 def calc_trend_stability(df, window=20):
     if df is None or len(df) < window + 2:
         return None, 0, window
-
     count_long = 0
     for i in range(len(df) - window, len(df)):
         op, last, sz, scz = get_four_dimension_advice(df, i)
         status, _ = map_status(op, sz)
-
         if status in ["⭐ 多單進場", "✅ 多單續抱"]:
             count_long += 1
-
     ratio = round(count_long / window * 100, 1)
     return ratio, count_long, window
-
 
 def interpret_trend_stability(ratio):
     if ratio is None:
         return "未提供", "—"
-
     if ratio > 70:
         return "🔥 強勢主升段", "可續抱 / 加碼"
     elif ratio >= 50:
@@ -105,13 +101,11 @@ def calc_last5_trend_series(df, window=20, days=5):
     series = []
     if df is None or len(df) < window + days + 2:
         return series
-
     for k in range(days, 0, -1):
         idx = len(df) - k
         sub_df = df.iloc[:idx+1]
         ratio, _, _ = calc_trend_stability(sub_df, window)
         series.append(ratio)
-
     return series
 
 # ===================================================================
@@ -121,22 +115,10 @@ with st.sidebar:
     st.title("🎯 分析模式")
     mode = st.radio("選擇分析類型", ["單股分析", "台股市場分析", "美股市場分析"])
     st.divider()
-    # 🔥 使用者可選分析基準日
     target_date = st.date_input("分析基準日", date.today())
     st.divider()
     ticker_input = st.text_input("單股代號", "2330")
     run_btn = st.button("開始分析")
-
-# ===================================================================
-# 時間設定
-# ===================================================================
-LOOKBACK_1Y = 365
-if isinstance(target_date, date):
-    base_dt = datetime.combine(target_date, datetime.min.time())
-else:
-    base_dt = target_date
-end_dt = base_dt + timedelta(days=1)
-start_1y = end_dt - timedelta(days=LOOKBACK_1Y)
 
 # ===================================================================
 # 工具函式
@@ -263,7 +245,6 @@ if run_btn and mode in ["台股市場分析","美股市場分析"]:
         df_show = pd.DataFrame(results)\
             .sort_values(["20日擴散率%","_rank"], ascending=[False,True])\
             .drop(columns=["_rank"])
-
         st.dataframe(df_show, use_container_width=True)
 
         count_rows = []
@@ -275,9 +256,7 @@ if run_btn and mode in ["台股市場分析","美股市場分析"]:
                 "數量": v,
                 "昨日比較": f"{diff}{arrow}"
             })
-
         st.subheader("📈 狀態統計")
         st.dataframe(pd.DataFrame(count_rows), use_container_width=True)
-
     else:
         st.warning("市場清單沒有可用資料")
