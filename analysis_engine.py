@@ -13,12 +13,12 @@ import pandas as pd
 from datetime import datetime, date, timedelta
 
 # --------------------
-# yfinance 導入 (移除 subprocess 安裝)
+# yfinance 導入（移除 subprocess 安裝）
 # --------------------
 import yfinance as yf
 
 # --------------------
-# 從專案 config 導入
+# 從專案 config 導入 WATCH_LIST，沒有時提供備援
 # --------------------
 try:
     from config import WATCH_LIST
